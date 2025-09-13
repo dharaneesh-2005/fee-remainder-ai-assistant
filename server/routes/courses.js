@@ -1,6 +1,6 @@
 const express = require('express');
 const { authenticate } = require('../middleware/auth');
-const { pool } = require('../config/database');
+const { executeQuery } = require('../config/database');
 
 const router = express.Router();
 
@@ -10,7 +10,7 @@ router.use(authenticate);
 // Get all courses
 router.get('/', async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM courses ORDER BY created_at DESC');
+    const result = await executeQuery('SELECT * FROM courses ORDER BY created_at DESC');
     res.json(result.rows);
   } catch (error) {
     console.error('Error fetching courses:', error);

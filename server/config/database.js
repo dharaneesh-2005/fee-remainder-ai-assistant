@@ -7,28 +7,37 @@ const pool = new Pool({
   user: process.env.DB_USER || 'postgres',
   password: process.env.DB_PASSWORD || 'password',
   ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
-  max: 20,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 10000,
-  acquireTimeoutMillis: 10000,
-  createTimeoutMillis: 10000,
+  max: 5, // Reduced pool size for cloud databases
+  min: 1, // Keep at least 1 connection alive
+  idleTimeoutMillis: 10000, // Reduced idle timeout
+  connectionTimeoutMillis: 30000, // Increased connection timeout
+  acquireTimeoutMillis: 30000, // Increased acquire timeout
+  createTimeoutMillis: 30000, // Increased create timeout
   destroyTimeoutMillis: 5000,
   reapIntervalMillis: 1000,
   createRetryIntervalMillis: 200,
+  allowExitOnIdle: false, // Don't exit when idle
 });
 
-// Test database connection
-const connect = async () => {
-  try {
-    const client = await pool.connect();
-    console.log('Connected to PostgreSQL database');
-    client.release();
-    return true;
-  } catch (error) {
-    console.error('Database connection error:', error.message);
-    // Don't exit on connection error, let the app continue
-    return false;
+// Test database connection with retry logic
+const connect = async (retries = 3) => {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const client = await pool.connect();
+      console.log('Connected to PostgreSQL database');
+      client.release();
+      return true;
+    } catch (error) {
+      console.error(`Database connection attempt ${i + 1} failed:`, error.message);
+      if (i === retries - 1) {
+        console.error('All database connection attempts failed');
+        return false;
+      }
+      // Wait before retrying
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
   }
+  return false;
 };
 
 // Initialize database tables
@@ -135,8 +144,40 @@ const initializeDatabase = async () => {
   }
 };
 
+// Health check function
+const healthCheck = async () => {
+  try {
+    const client = await pool.connect();
+    await client.query('SELECT 1');
+    client.release();
+    return true;
+  } catch (error) {
+    console.error('Database health check failed:', error.message);
+    return false;
+  }
+};
+
+// Execute query with retry logic
+const executeQuery = async (query, params = [], retries = 2) => {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const result = await pool.query(query, params);
+      return result;
+    } catch (error) {
+      console.error(`Query attempt ${i + 1} failed:`, error.message);
+      if (i === retries - 1) {
+        throw error;
+      }
+      // Wait before retrying
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+  }
+};
+
 module.exports = {
   pool,
   connect,
-  initializeDatabase
+  initializeDatabase,
+  healthCheck,
+  executeQuery
 };

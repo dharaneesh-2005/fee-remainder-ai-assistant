@@ -63,12 +63,24 @@ app.use('/api/payments', paymentRoutes);
 app.use('/api/reminders', reminderRoutes);
 
 // Health check endpoint
-app.get('/api/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime()
-  });
+app.get('/api/health', async (req, res) => {
+  try {
+    const dbHealthy = await db.healthCheck();
+    res.json({ 
+      status: dbHealthy ? 'OK' : 'DEGRADED',
+      database: dbHealthy ? 'Connected' : 'Disconnected',
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime()
+    });
+  } catch (error) {
+    res.status(503).json({
+      status: 'ERROR',
+      database: 'Error',
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime(),
+      error: error.message
+    });
+  }
 });
 
 // Error handling middleware
