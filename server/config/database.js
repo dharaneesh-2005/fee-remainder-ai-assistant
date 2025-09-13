@@ -6,9 +6,15 @@ const pool = new Pool({
   database: process.env.DB_NAME || 'fee_remainder_db',
   user: process.env.DB_USER || 'postgres',
   password: process.env.DB_PASSWORD || 'password',
+  ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
   max: 20,
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 2000,
+  connectionTimeoutMillis: 10000,
+  acquireTimeoutMillis: 10000,
+  createTimeoutMillis: 10000,
+  destroyTimeoutMillis: 5000,
+  reapIntervalMillis: 1000,
+  createRetryIntervalMillis: 200,
 });
 
 // Test database connection
@@ -19,15 +25,17 @@ const connect = async () => {
     client.release();
     return true;
   } catch (error) {
-    console.error('Database connection error:', error);
+    console.error('Database connection error:', error.message);
+    // Don't exit on connection error, let the app continue
     return false;
   }
 };
 
 // Initialize database tables
 const initializeDatabase = async () => {
+  let client;
   try {
-    const client = await pool.connect();
+    client = await pool.connect();
     
     // Create tables
     await client.query(`
@@ -116,11 +124,14 @@ const initializeDatabase = async () => {
       CREATE INDEX IF NOT EXISTS idx_reminders_student_id ON reminders(student_id);
     `);
 
-    client.release();
     console.log('✅ Database tables initialized successfully');
   } catch (error) {
-    console.error('❌ Database initialization error:', error);
+    console.error('❌ Database initialization error:', error.message);
     throw error;
+  } finally {
+    if (client) {
+      client.release();
+    }
   }
 };
 

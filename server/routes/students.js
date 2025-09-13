@@ -56,7 +56,7 @@ router.post('/', async (req, res) => {
     
     const result = await pool.query(
       'INSERT INTO students (name, email, phone, department, course_id, enrollment_date) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
-      [name, email, phone, department, course_id, enrollment_date]
+      [name, email, phone, department, course_id, enrollment_date || null]
     );
     
     res.status(201).json(result.rows[0]);
@@ -77,7 +77,7 @@ router.put('/:id', async (req, res) => {
     
     const result = await pool.query(
       'UPDATE students SET name = $1, email = $2, phone = $3, department = $4, course_id = $5, enrollment_date = $6, updated_at = CURRENT_TIMESTAMP WHERE id = $7 RETURNING *',
-      [name, email, phone, department, course_id, enrollment_date, id]
+      [name, email, phone, department, course_id, enrollment_date || null, id]
     );
     
     if (result.rows.length === 0) {

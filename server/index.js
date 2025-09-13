@@ -37,16 +37,21 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Database connection and initialization
 db.connect()
-  .then(() => {
-    console.log('✅ Database connected successfully');
-    return db.initializeDatabase();
+  .then((connected) => {
+    if (connected) {
+      console.log('✅ Database connected successfully');
+      return db.initializeDatabase();
+    } else {
+      console.log('⚠️ Database connection failed, but continuing...');
+      return Promise.resolve();
+    }
   })
   .then(() => {
-    console.log('✅ Database initialized successfully');
+    console.log('✅ Database initialization completed');
   })
   .catch((error) => {
-    console.error('❌ Database connection/initialization failed:', error);
-    process.exit(1);
+    console.error('❌ Database initialization failed:', error.message);
+    // Don't exit, let the app continue
   });
 
 // Routes

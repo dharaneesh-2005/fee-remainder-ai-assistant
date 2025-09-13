@@ -25,8 +25,6 @@ import {
   Grid,
   Card,
   CardContent,
-  FormControlLabel,
-  Switch
 } from '@mui/material';
 import {
   Payment as PaymentIcon,
