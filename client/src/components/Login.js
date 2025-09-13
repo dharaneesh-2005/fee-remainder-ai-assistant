@@ -25,15 +25,26 @@ const Login = () => {
     setLoading(true);
     setError('');
 
-    const result = await login(username, password);
-    
-    if (result.success) {
-      navigate('/');
-    } else {
-      setError(result.error || 'Login failed');
+    try {
+      const result = await login(username, password);
+      
+      if (result.success) {
+        navigate('/');
+      } else {
+        setError(result.error || 'Login failed');
+      }
+    } catch (error) {
+      console.error('Login error:', error);
+      if (error.code === 'ECONNABORTED') {
+        setError('Request timeout. Please try again.');
+      } else if (!error.response) {
+        setError('Network error. Please check if the server is running.');
+      } else {
+        setError('Login failed. Please try again.');
+      }
+    } finally {
+      setLoading(false);
     }
-    
-    setLoading(false);
   };
 
   return (
