@@ -9,16 +9,37 @@ const router = express.Router();
 // Apply authentication to all routes
 router.use(authenticate);
 
-// Initialize Twilio client
-const twilioClient = twilio(
-  process.env.TWILIO_ACCOUNT_SID,
-  process.env.TWILIO_AUTH_TOKEN
-);
+// Initialize Twilio client with error handling
+let twilioClient = null;
+let groq = null;
 
-// Initialize Groq client
-const groq = new Groq({
-  apiKey: process.env.GROQ_API_KEY
-});
+try {
+  if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
+    twilioClient = twilio(
+      process.env.TWILIO_ACCOUNT_SID,
+      process.env.TWILIO_AUTH_TOKEN
+    );
+    console.log('✅ Twilio client initialized');
+  } else {
+    console.warn('⚠️ Twilio credentials not found in environment variables');
+  }
+} catch (error) {
+  console.error('❌ Failed to initialize Twilio client:', error.message);
+}
+
+// Initialize Groq client with error handling
+try {
+  if (process.env.GROQ_API_KEY) {
+    groq = new Groq({
+      apiKey: process.env.GROQ_API_KEY
+    });
+    console.log('✅ Groq client initialized');
+  } else {
+    console.warn('⚠️ Groq API key not found in environment variables');
+  }
+} catch (error) {
+  console.error('❌ Failed to initialize Groq client:', error.message);
+}
 
 // Get all reminders
 router.get('/', async (req, res) => {
@@ -41,6 +62,9 @@ router.get('/', async (req, res) => {
 // Send reminder to all students with pending fees
 router.post('/send-all', async (req, res) => {
   try {
+    if (!twilioClient) {
+      return res.status(503).json({ error: 'Twilio service not available. Please check configuration.' });
+    }
     // Get all students with pending fees
     const studentsResult = await pool.query(`
       SELECT DISTINCT s.*, c.name as course_name,
@@ -195,6 +219,13 @@ router.post('/handle-response', async (req, res) => {
 // Generate AI conversation TwiML
 async function generateAIConversation(student) {
   try {
+    if (!groq) {
+      return `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say voice="alice">I'm sorry, I'm having trouble right now. Let me connect you to a mentor.</Say>
+  <Redirect>/api/reminders/connect-mentor</Redirect>
+</Response>`;
+    }
     // Prepare context for Groq AI
     const context = `
       Student Information:
@@ -317,6 +348,9 @@ router.post('/ai-response', async (req, res) => {
 // Process student question with Groq AI
 async function processStudentQuestion(student, question) {
   try {
+    if (!groq) {
+      return "I'm sorry, I'm having trouble understanding. Let me connect you to a mentor who can help you.";
+    }
     const context = `
       Student Information:
       - Name: ${student.name}
