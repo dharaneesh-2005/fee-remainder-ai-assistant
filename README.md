@@ -1,177 +1,281 @@
-# Fee Remainder AI Assistant
+# AI Fee Reminder System
 
-An AI-powered fee remainder system with call assistant functionality using Twilio and Groq AI.
+An intelligent payment reminder system that uses AI to automatically call students with pending fees, powered by Twilio voice calls and Groq's ultra-fast AI models.
 
 ## Features
 
-- **AI-Powered Reminders**: Uses Groq's fastest model for ultra-fast responses (< 2 seconds)
-- **Live Transcription**: Groq's Whisper Large V3 Turbo for real-time speech-to-text
-- **Smart Context**: AI has full context of student details, courses, and fee information
-- **Rate-Limited Calls**: Respects Twilio's 1.1s rate limit between calls
-- **Mentor Escalation**: Automatically connects to mentors when AI cannot answer questions
-- **Complete Management System**: Courses, Students, Fees, and Payments management
-- **Payment Simulation**: Built-in payment processing simulation
-- **Modern UI**: React with Material-UI for a beautiful interface
+### 🤖 AI-Powered Voice Calls
+- **Ultra-fast AI responses** using Groq's fastest model (Llama 3.1 8B Instant)
+- **Live transcription** with Groq's Whisper Large V3 Turbo
+- **Total response time under 2 seconds** for seamless conversations
+- **Intelligent conversation flow** with full student context
+- **Automatic mentor escalation** for complex queries
 
-## Tech Stack
+### 📞 Smart Reminder System
+- **Rate-limited calling** (1.1 seconds between calls) to respect Twilio limits
+- **Bulk reminder functionality** to call all students with pending fees
+- **Individual student calling** for targeted reminders
+- **Call status tracking** and conversation logging
 
-- **Frontend**: React, Material-UI, React Router
-- **Backend**: Node.js, Express.js
-- **Database**: PostgreSQL
-- **AI**: Groq API (Whisper + Fastest Model)
-- **Communication**: Twilio Voice API
-- **Authentication**: JWT-based simple auth
+### 🎓 Complete Student Management
+- **Course Management**: Create and manage courses with fee structures
+- **Student Enrollment**: Add students and assign them to courses
+- **Fee Tracking**: Assign fee amounts and track payment status
+- **Payment Simulation**: Record payments without external payment providers
+- **Comprehensive Dashboard**: Overview of all system metrics
 
-## Getting Started
+### 🔐 Secure Authentication
+- Simple username/password authentication
+- JWT-based session management
+- Protected routes and API endpoints
+
+## Technology Stack
+
+### Backend
+- **Node.js** with Express.js
+- **PostgreSQL** database
+- **Twilio** for voice calls
+- **Groq SDK** for AI integration
+- **JWT** for authentication
+- **bcryptjs** for password hashing
+
+### Frontend
+- **React 18** with functional components
+- **React Router** for navigation
+- **Tailwind CSS** for styling
+- **Axios** for API calls
+- **React Toastify** for notifications
+- **Lucide React** for icons
+
+## Installation & Setup
 
 ### Prerequisites
+- Node.js (v16 or higher)
+- PostgreSQL (v12 or higher)
+- Twilio account with phone number
+- Groq API key
 
-- Node.js (v14 or higher)
-- PostgreSQL
-- Twilio Account
-- Groq API Key
-
-### Installation
-
-1. Clone the repository:
+### 1. Clone the Repository
 ```bash
-git clone https://github.com/dharaneesh-2005/fee-remainder-ai-assistant.git
-cd fee-remainder-ai-assistant
+git clone <repository-url>
+cd ai-fee-reminder
 ```
 
-2. Install dependencies:
+### 2. Install Dependencies
 ```bash
+# Install root dependencies
+npm install
+
+# Install all dependencies (root, server, and client)
 npm run install-all
 ```
 
-3. Set up environment variables:
+### 3. Database Setup
 ```bash
-# Copy the example environment file
-cp server/env.example server/.env
+# Create PostgreSQL database
+createdb ai_fee_reminder
 
-# Edit server/.env with your configuration:
-# - Database credentials
-# - Twilio credentials
-# - Groq API key
-# - JWT secret
+# Run the schema
+psql ai_fee_reminder < server/config/schema.sql
 ```
 
-4. Set up PostgreSQL database:
-```bash
-# Create database
-createdb fee_remainder_db
+### 4. Environment Configuration
+Create a `.env` file in the `server` directory:
 
-# The application will automatically create tables on first run
+```env
+# Database Configuration
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=ai_fee_reminder
+DB_USER=your_db_user
+DB_PASSWORD=your_db_password
+
+# JWT Secret
+JWT_SECRET=your_jwt_secret_key
+
+# Twilio Configuration
+TWILIO_ACCOUNT_SID=your_twilio_account_sid
+TWILIO_AUTH_TOKEN=your_twilio_auth_token
+TWILIO_PHONE_NUMBER=your_twilio_phone_number
+
+# Groq Configuration
+GROQ_API_KEY=your_groq_api_key
+
+# Server Configuration
+PORT=5000
+NODE_ENV=development
 ```
 
-5. Start the development servers:
+### 5. Start the Application
 ```bash
+# Start both server and client in development mode
 npm run dev
+
+# Or start them separately:
+# Server: npm run server
+# Client: npm run client
 ```
 
-This will start both the backend server (port 5000) and frontend (port 3000).
+The application will be available at:
+- Frontend: http://localhost:3000
+- Backend API: http://localhost:5000
 
-### Default Login Credentials
+## Default Login Credentials
+- **Username**: admin
+- **Password**: password
 
-- Username: `admin`
-- Password: `admin123`
+## Usage Workflow
 
-## Project Structure
+### 1. Course Management
+1. Navigate to the **Courses** section
+2. Click **Add Course** to create a new course
+3. Fill in course details (name, description, duration, fee amount)
+4. Save the course
 
-```
-├── client/                 # React frontend
-│   ├── src/
-│   │   ├── components/     # React components
-│   │   ├── contexts/       # React contexts
-│   │   └── services/       # API services
-├── server/                 # Express backend
-│   ├── config/            # Database configuration
-│   ├── routes/            # API routes
-│   ├── models/            # Data models
-│   ├── middleware/        # Express middleware
-│   └── utils/             # Utility functions
-└── README.md
-```
+### 2. Student Enrollment
+1. Go to the **Students** section
+2. Click **Add Student** to enroll a new student
+3. Fill in student details (name, email, phone, course assignment)
+4. Save the student record
+
+### 3. Fee Assignment
+1. Navigate to the **Fees** section
+2. Click **Add Fee Record** to assign fees to a student
+3. Select the student and course
+4. Set the total amount and due date
+5. Save the fee record
+
+### 4. Payment Recording
+1. Go to the **Payments** section
+2. Click **Record Payment** to log a payment
+3. Select the student and fee record
+4. Enter the payment amount
+5. The system will automatically update fee status
+
+### 5. AI-Powered Reminders
+1. Navigate to the **Reminders** section
+2. View all students with pending fees
+3. Use **Call Now** for individual students or **Call All Students** for bulk reminders
+4. The AI will:
+   - Call the student with a personalized message
+   - Listen to their response using live transcription
+   - Provide intelligent responses based on student context
+   - Escalate to mentor if needed
 
 ## API Endpoints
 
 ### Authentication
 - `POST /api/auth/login` - User login
+- `GET /api/auth/me` - Get current user
+- `POST /api/auth/logout` - User logout
 
 ### Courses
 - `GET /api/courses` - Get all courses
-- `POST /api/courses` - Create course
+- `POST /api/courses` - Create new course
 - `PUT /api/courses/:id` - Update course
 - `DELETE /api/courses/:id` - Delete course
 
 ### Students
 - `GET /api/students` - Get all students
-- `POST /api/students` - Create student
+- `POST /api/students` - Create new student
 - `PUT /api/students/:id` - Update student
 - `DELETE /api/students/:id` - Delete student
 
 ### Fees
 - `GET /api/fees` - Get all fees
-- `POST /api/fees` - Assign fee
-- `PUT /api/fees/:id` - Update fee
-- `DELETE /api/fees/:id` - Delete fee
+- `GET /api/fees/pending/list` - Get pending fees
+- `POST /api/fees` - Create fee record
+- `PUT /api/fees/:id` - Update fee record
+- `DELETE /api/fees/:id` - Delete fee record
 
 ### Payments
 - `GET /api/payments` - Get all payments
-- `POST /api/payments/process` - Process payment
+- `POST /api/payments` - Record payment
+- `GET /api/payments/summary/:studentId` - Get payment summary
 
 ### Reminders
-- `GET /api/reminders` - Get reminder history
-- `POST /api/reminders/send-all` - Send AI-powered reminders
+- `GET /api/reminders` - Get all reminders
+- `POST /api/reminders/send/:studentId` - Send reminder to student
+- `POST /api/reminders/send-all` - Send reminders to all students
+- `POST /api/reminders/handle-response/:reminderId` - Twilio webhook handler
 
-## AI Integration Workflow
+## AI Integration Details
 
-1. **Reminder Initiation**: Admin clicks "Send All Reminders"
-2. **Rate-Limited Calls**: System calls each student with 1.1s delay
-3. **Default Message**: Plays student name and pending fee amount
-4. **AI Interaction**: If student asks questions, Groq AI responds
-5. **Live Transcription**: Whisper converts speech to text
-6. **Ultra-Fast Response**: Groq's fastest model responds in < 2 seconds
-7. **Smart Escalation**: Connects to mentor if AI cannot answer
+### Groq Models Used
+- **Llama 3.1 8B Instant**: Ultra-fast response generation
+- **Whisper Large V3 Turbo**: Live audio transcription
 
-## Environment Variables
+### AI Conversation Flow
+1. **Initial Call**: AI greets student with personalized message including name and pending amount
+2. **Response Processing**: Student's response is transcribed using Whisper
+3. **Context-Aware Response**: AI generates response using student's full context (name, course, fees, etc.)
+4. **Escalation Logic**: If AI cannot answer or student requests mentor, call is escalated
+5. **Conversation Continuation**: Process continues until student ends call or escalates
 
-```env
-# Database
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=fee_remainder_db
-DB_USER=your_db_user
-DB_PASSWORD=your_db_password
+### Rate Limiting
+- Calls are rate-limited to 1.1 seconds between each call
+- Respects Twilio's rate limits to avoid service disruption
+- Bulk calling includes automatic delays between calls
 
-# JWT
-JWT_SECRET=your_jwt_secret_key
+## Database Schema
 
-# Twilio
-TWILIO_ACCOUNT_SID=your_twilio_account_sid
-TWILIO_AUTH_TOKEN=your_twilio_auth_token
-TWILIO_PHONE_NUMBER=your_twilio_phone_number
+The system uses the following main tables:
+- `users` - Authentication and user management
+- `courses` - Course information and fee structures
+- `students` - Student details and enrollment information
+- `fees` - Fee records and payment tracking
+- `payments` - Payment history and transaction records
+- `reminders` - Reminder call tracking and status
+- `call_logs` - Detailed conversation logs and AI responses
 
-# Groq
-GROQ_API_KEY=your_groq_api_key
+## Security Features
 
-# Server
-PORT=5000
-NODE_ENV=development
+- JWT-based authentication
+- Password hashing with bcrypt
+- Rate limiting on API endpoints
+- Input validation and sanitization
+- CORS protection
+- Helmet.js security headers
+
+## Development
+
+### Project Structure
 ```
+ai-fee-reminder/
+├── client/                 # React frontend
+│   ├── public/
+│   ├── src/
+│   │   ├── components/     # React components
+│   │   ├── contexts/       # React contexts
+│   │   └── ...
+│   └── package.json
+├── server/                 # Express backend
+│   ├── config/            # Database and configuration
+│   ├── middleware/        # Express middleware
+│   ├── routes/           # API routes
+│   └── package.json
+├── package.json          # Root package.json
+└── README.md
+```
+
+### Available Scripts
+- `npm run dev` - Start both server and client
+- `npm run server` - Start only the server
+- `npm run client` - Start only the client
+- `npm run install-all` - Install all dependencies
 
 ## Contributing
 
 1. Fork the repository
 2. Create a feature branch
 3. Make your changes
-4. Add tests if applicable
+4. Test thoroughly
 5. Submit a pull request
 
 ## License
 
-This project is open source and available under the [MIT License](LICENSE).
+This project is licensed under the MIT License.
 
 ## Support
 
-For support, please open an issue on GitHub or contact the maintainers.
+For support and questions, please create an issue in the repository or contact the development team.

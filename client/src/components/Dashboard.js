@@ -1,200 +1,298 @@
 import React, { useState, useEffect } from 'react';
-import {
-  Grid,
-  Card,
-  CardContent,
-  Typography,
-  Box,
-  CircularProgress,
-  Alert
-} from '@mui/material';
-import {
-  School as SchoolIcon,
-  People as PeopleIcon,
-  Payment as PaymentIcon,
-  Phone as PhoneIcon
-} from '@mui/icons-material';
-import { courseService, studentService, feeService, paymentService } from '../services/authService';
-
-const StatCard = ({ title, value, icon, color = 'primary' }) => (
-  <Card>
-    <CardContent>
-      <Box display="flex" alignItems="center" justifyContent="space-between">
-        <Box>
-          <Typography color="textSecondary" gutterBottom variant="h6">
-            {title}
-          </Typography>
-          <Typography variant="h4" component="h2">
-            {value}
-          </Typography>
-        </Box>
-        <Box color={`${color}.main`}>
-          {icon}
-        </Box>
-      </Box>
-    </CardContent>
-  </Card>
-);
+import axios from 'axios';
+import { 
+  BookOpen, 
+  Users, 
+  DollarSign, 
+  CreditCard, 
+  Phone,
+  TrendingUp,
+  AlertCircle,
+  CheckCircle
+} from 'lucide-react';
 
 const Dashboard = () => {
   const [stats, setStats] = useState({
-    courses: 0,
-    students: 0,
-    pendingFees: 0,
-    totalPendingAmount: 0,
+    totalCourses: 0,
+    totalStudents: 0,
+    totalFees: 0,
     totalPayments: 0,
-    totalAmountCollected: 0
+    pendingFees: 0,
+    recentReminders: 0
   });
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const [recentActivities, setRecentActivities] = useState([]);
 
   useEffect(() => {
-    const fetchStats = async () => {
-      try {
-        setLoading(true);
-        
-        const [coursesRes, studentsRes, feesRes, paymentsRes] = await Promise.all([
-          courseService.getAll(),
-          studentService.getAll(),
-          feeService.getPendingSummary(),
-          paymentService.getSummary()
-        ]);
-
-        const courses = coursesRes.data.length;
-        const students = studentsRes.data.length;
-        const pendingFees = feesRes.data.total_pending_fees || 0;
-        const totalPendingAmount = feesRes.data.total_pending_amount || 0;
-        
-        const totalPayments = paymentsRes.data.reduce((sum, payment) => sum + payment.total_payments, 0);
-        const totalAmountCollected = paymentsRes.data.reduce((sum, payment) => sum + payment.total_amount_collected, 0);
-
-        setStats({
-          courses,
-          students,
-          pendingFees,
-          totalPendingAmount,
-          totalPayments,
-          totalAmountCollected
-        });
-      } catch (error) {
-        console.error('Error fetching dashboard stats:', error);
-        setError('Failed to load dashboard data');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchStats();
+    fetchDashboardData();
   }, []);
+
+  const fetchDashboardData = async () => {
+    try {
+      setLoading(true);
+      
+      // Fetch all data in parallel
+      const [coursesRes, studentsRes, feesRes, paymentsRes, remindersRes] = await Promise.all([
+        axios.get('/api/courses'),
+        axios.get('/api/students'),
+        axios.get('/api/fees'),
+        axios.get('/api/payments'),
+        axios.get('/api/reminders')
+      ]);
+
+      const courses = coursesRes.data;
+      const students = studentsRes.data;
+      const fees = feesRes.data;
+      const payments = paymentsRes.data;
+      const reminders = remindersRes.data;
+
+      // Calculate stats
+      const totalFees = fees.reduce((sum, fee) => sum + parseFloat(fee.total_amount || 0), 0);
+      const totalPayments = payments.reduce((sum, payment) => sum + parseFloat(payment.amount || 0), 0);
+      const pendingFees = fees.reduce((sum, fee) => sum + parseFloat(fee.pending_amount || 0), 0);
+
+      setStats({
+        totalCourses: courses.length,
+        totalStudents: students.length,
+        totalFees: totalFees,
+        totalPayments: totalPayments,
+        pendingFees: pendingFees,
+        recentReminders: reminders.filter(r => {
+          const reminderDate = new Date(r.created_at);
+          const weekAgo = new Date();
+          weekAgo.setDate(weekAgo.getDate() - 7);
+          return reminderDate > weekAgo;
+        }).length
+      });
+
+      // Set recent activities (last 5 payments and reminders)
+      const recentPayments = payments.slice(0, 3).map(payment => ({
+        type: 'payment',
+        message: `Payment of ₹${payment.amount} received from ${payment.student_name}`,
+        date: payment.payment_date,
+        icon: CreditCard
+      }));
+
+      const recentRemindersList = reminders.slice(0, 2).map(reminder => ({
+        type: 'reminder',
+        message: `Reminder sent to ${reminder.student_name}`,
+        date: reminder.created_at,
+        icon: Phone,
+        status: reminder.call_status
+      }));
+
+      setRecentActivities([...recentPayments, ...recentRemindersList].sort((a, b) => 
+        new Date(b.date) - new Date(a.date)
+      ).slice(0, 5));
+
+    } catch (error) {
+      console.error('Error fetching dashboard data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const statCards = [
+    {
+      name: 'Total Courses',
+      value: stats.totalCourses,
+      icon: BookOpen,
+      color: 'bg-blue-500'
+    },
+    {
+      name: 'Total Students',
+      value: stats.totalStudents,
+      icon: Users,
+      color: 'bg-green-500'
+    },
+    {
+      name: 'Total Fees',
+      value: `₹${stats.totalFees.toLocaleString()}`,
+      icon: DollarSign,
+      color: 'bg-yellow-500'
+    },
+    {
+      name: 'Pending Fees',
+      value: `₹${stats.pendingFees.toLocaleString()}`,
+      icon: AlertCircle,
+      color: 'bg-red-500'
+    },
+    {
+      name: 'Total Payments',
+      value: `₹${stats.totalPayments.toLocaleString()}`,
+      icon: CreditCard,
+      color: 'bg-purple-500'
+    },
+    {
+      name: 'Recent Reminders',
+      value: stats.recentReminders,
+      icon: Phone,
+      color: 'bg-indigo-500'
+    }
+  ];
 
   if (loading) {
     return (
-      <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
-        <CircularProgress />
-      </Box>
-    );
-  }
-
-  if (error) {
-    return (
-      <Alert severity="error" sx={{ mb: 2 }}>
-        {error}
-      </Alert>
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
+      </div>
     );
   }
 
   return (
-    <Box>
-      <Typography variant="h4" gutterBottom>
-        Dashboard
-      </Typography>
-      <Typography variant="body1" color="text.secondary" gutterBottom>
-        Welcome to the Fee Remainder AI Assistant. Here's an overview of your system.
-      </Typography>
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
+        <p className="mt-1 text-sm text-gray-500">
+          Overview of your AI Fee Reminder System
+        </p>
+      </div>
 
-      <Grid container spacing={3} sx={{ mt: 2 }}>
-        <Grid item xs={12} sm={6} md={3}>
-          <StatCard
-            title="Total Courses"
-            value={stats.courses}
-            icon={<SchoolIcon sx={{ fontSize: 40 }} />}
-            color="primary"
-          />
-        </Grid>
-        <Grid item xs={12} sm={6} md={3}>
-          <StatCard
-            title="Total Students"
-            value={stats.students}
-            icon={<PeopleIcon sx={{ fontSize: 40 }} />}
-            color="secondary"
-          />
-        </Grid>
-        <Grid item xs={12} sm={6} md={3}>
-          <StatCard
-            title="Pending Fees"
-            value={stats.pendingFees}
-            icon={<PaymentIcon sx={{ fontSize: 40 }} />}
-            color="warning"
-          />
-        </Grid>
-        <Grid item xs={12} sm={6} md={3}>
-          <StatCard
-            title="Pending Amount"
-            value={`₹${stats.totalPendingAmount.toLocaleString()}`}
-            icon={<PhoneIcon sx={{ fontSize: 40 }} />}
-            color="error"
-          />
-        </Grid>
-      </Grid>
+      {/* Stats Grid */}
+      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+        {statCards.map((stat) => {
+          const Icon = stat.icon;
+          return (
+            <div key={stat.name} className="bg-white overflow-hidden shadow rounded-lg">
+              <div className="p-5">
+                <div className="flex items-center">
+                  <div className="flex-shrink-0">
+                    <div className={`p-3 rounded-md ${stat.color}`}>
+                      <Icon className="h-6 w-6 text-white" />
+                    </div>
+                  </div>
+                  <div className="ml-5 w-0 flex-1">
+                    <dl>
+                      <dt className="text-sm font-medium text-gray-500 truncate">
+                        {stat.name}
+                      </dt>
+                      <dd className="text-lg font-medium text-gray-900">
+                        {stat.value}
+                      </dd>
+                    </dl>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
 
-      <Grid container spacing={3} sx={{ mt: 1 }}>
-        <Grid item xs={12} sm={6}>
-          <Card>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Payment Summary
-              </Typography>
-              <Typography variant="h4" color="primary">
-                {stats.totalPayments}
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Total payments processed
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={12} sm={6}>
-          <Card>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Amount Collected
-              </Typography>
-              <Typography variant="h4" color="success.main">
-                ₹{stats.totalAmountCollected.toLocaleString()}
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Total amount collected
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
+      {/* Recent Activities */}
+      <div className="bg-white shadow rounded-lg">
+        <div className="px-4 py-5 sm:p-6">
+          <h3 className="text-lg leading-6 font-medium text-gray-900 mb-4">
+            Recent Activities
+          </h3>
+          <div className="flow-root">
+            <ul className="-mb-8">
+              {recentActivities.map((activity, activityIdx) => {
+                const Icon = activity.icon;
+                return (
+                  <li key={activityIdx}>
+                    <div className="relative pb-8">
+                      {activityIdx !== recentActivities.length - 1 ? (
+                        <span
+                          className="absolute top-4 left-4 -ml-px h-full w-0.5 bg-gray-200"
+                          aria-hidden="true"
+                        />
+                      ) : null}
+                      <div className="relative flex space-x-3">
+                        <div>
+                          <span className={`h-8 w-8 rounded-full flex items-center justify-center ring-8 ring-white ${
+                            activity.type === 'payment' ? 'bg-green-500' : 'bg-blue-500'
+                          }`}>
+                            <Icon className="h-4 w-4 text-white" />
+                          </span>
+                        </div>
+                        <div className="min-w-0 flex-1 pt-1.5 flex justify-between space-x-4">
+                          <div>
+                            <p className="text-sm text-gray-500">{activity.message}</p>
+                          </div>
+                          <div className="text-right text-sm whitespace-nowrap text-gray-500">
+                            {new Date(activity.date).toLocaleDateString()}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        </div>
+      </div>
 
-      <Card sx={{ mt: 3 }}>
-        <CardContent>
-          <Typography variant="h6" gutterBottom>
+      {/* Quick Actions */}
+      <div className="bg-white shadow rounded-lg">
+        <div className="px-4 py-5 sm:p-6">
+          <h3 className="text-lg leading-6 font-medium text-gray-900 mb-4">
             Quick Actions
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            • Add new courses in the Courses section
-            • Register students in the Students section
-            • Assign fees to students in the Fees section
-            • Process payments in the Payments section
-            • Send AI-powered reminders in the Reminders section
-          </Typography>
-        </CardContent>
-      </Card>
-    </Box>
+          </h3>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <button
+              onClick={() => window.location.href = '/courses'}
+              className="relative group bg-white p-6 focus-within:ring-2 focus-within:ring-inset focus-within:ring-primary-500 rounded-lg border border-gray-300 hover:border-gray-400"
+            >
+              <div>
+                <span className="rounded-lg inline-flex p-3 bg-blue-50 text-blue-700 ring-4 ring-white">
+                  <BookOpen className="h-6 w-6" />
+                </span>
+              </div>
+              <div className="mt-8">
+                <h3 className="text-lg font-medium">
+                  <span className="absolute inset-0" aria-hidden="true" />
+                  Add Course
+                </h3>
+                <p className="mt-2 text-sm text-gray-500">
+                  Create a new course with fee structure
+                </p>
+              </div>
+            </button>
+
+            <button
+              onClick={() => window.location.href = '/students'}
+              className="relative group bg-white p-6 focus-within:ring-2 focus-within:ring-inset focus-within:ring-primary-500 rounded-lg border border-gray-300 hover:border-gray-400"
+            >
+              <div>
+                <span className="rounded-lg inline-flex p-3 bg-green-50 text-green-700 ring-4 ring-white">
+                  <Users className="h-6 w-6" />
+                </span>
+              </div>
+              <div className="mt-8">
+                <h3 className="text-lg font-medium">
+                  <span className="absolute inset-0" aria-hidden="true" />
+                  Add Student
+                </h3>
+                <p className="mt-2 text-sm text-gray-500">
+                  Enroll a new student to a course
+                </p>
+              </div>
+            </button>
+
+            <button
+              onClick={() => window.location.href = '/reminders'}
+              className="relative group bg-white p-6 focus-within:ring-2 focus-within:ring-inset focus-within:ring-primary-500 rounded-lg border border-gray-300 hover:border-gray-400"
+            >
+              <div>
+                <span className="rounded-lg inline-flex p-3 bg-red-50 text-red-700 ring-4 ring-white">
+                  <Phone className="h-6 w-6" />
+                </span>
+              </div>
+              <div className="mt-8">
+                <h3 className="text-lg font-medium">
+                  <span className="absolute inset-0" aria-hidden="true" />
+                  Send Reminders
+                </h3>
+                <p className="mt-2 text-sm text-gray-500">
+                  Call all students with pending fees
+                </p>
+              </div>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 };
 

@@ -1,17 +1,16 @@
 {
-  "name": "fee-remainder-ai-assistant",
+  "name": "ai-fee-reminder",
   "version": "1.0.0",
-  "description": "AI-powered fee remainder system with call assistant functionality",
+  "description": "AI-powered payment reminder system with Twilio and Groq integration",
   "main": "server/index.js",
   "scripts": {
     "dev": "concurrently \"npm run server\" \"npm run client\"",
     "server": "cd server && npm run dev",
     "client": "cd client && npm start",
-    "build": "cd client && npm run build",
     "install-all": "npm install && cd server && npm install && cd ../client && npm install"
   },
-  "keywords": ["fee", "reminder", "ai", "twilio", "groq"],
-  "author": "dharaneesh-2005",
+  "keywords": ["ai", "payment", "reminder", "twilio", "groq"],
+  "author": "",
   "license": "MIT",
   "devDependencies": {
     "concurrently": "^8.2.2"

@@ -1,58 +1,20 @@
 import React, { useState, useEffect } from 'react';
-import {
-  Box,
-  Typography,
-  Button,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Paper,
-  IconButton,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  TextField,
-  Alert,
-  CircularProgress,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
-  Chip,
-  Grid,
-  Card,
-  CardContent
-} from '@mui/material';
-import {
-  Add as AddIcon,
-  Edit as EditIcon,
-  Delete as DeleteIcon
-} from '@mui/icons-material';
-import { feeService, studentService, courseService } from '../services/authService';
+import axios from 'axios';
+import { toast } from 'react-toastify';
+import { Plus, Edit, Trash2, DollarSign, AlertCircle } from 'lucide-react';
 
 const Fees = () => {
   const [fees, setFees] = useState([]);
   const [students, setStudents] = useState([]);
   const [courses, setCourses] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [open, setOpen] = useState(false);
+  const [showModal, setShowModal] = useState(false);
   const [editingFee, setEditingFee] = useState(null);
   const [formData, setFormData] = useState({
     student_id: '',
     course_id: '',
-    amount: '',
-    due_date: '',
-    status: 'pending'
-  });
-  const [summary, setSummary] = useState({
-    total_pending_fees: 0,
-    total_pending_amount: 0,
-    students_with_pending_fees: 0
+    total_amount: '',
+    due_date: ''
   });
 
   useEffect(() => {
@@ -61,312 +23,308 @@ const Fees = () => {
 
   const fetchData = async () => {
     try {
-      setLoading(true);
-      const [feesRes, studentsRes, coursesRes, summaryRes] = await Promise.all([
-        feeService.getAll(),
-        studentService.getAll(),
-        courseService.getAll(),
-        feeService.getPendingSummary()
+      const [feesRes, studentsRes, coursesRes] = await Promise.all([
+        axios.get('/api/fees'),
+        axios.get('/api/students'),
+        axios.get('/api/courses')
       ]);
       setFees(feesRes.data);
       setStudents(studentsRes.data);
       setCourses(coursesRes.data);
-      setSummary(summaryRes.data);
     } catch (error) {
       console.error('Error fetching data:', error);
-      setError('Failed to load data');
+      toast.error('Failed to fetch data');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleOpen = (fee = null) => {
-    if (fee) {
-      setEditingFee(fee);
-      setFormData({
-        student_id: fee.student_id,
-        course_id: fee.course_id || '',
-        amount: fee.amount,
-        due_date: fee.due_date,
-        status: fee.status
-      });
-    } else {
-      setEditingFee(null);
-      setFormData({
-        student_id: '',
-        course_id: '',
-        amount: '',
-        due_date: '',
-        status: 'pending'
-      });
-    }
-    setOpen(true);
-  };
-
-  const handleClose = () => {
-    setOpen(false);
-    setEditingFee(null);
-    setFormData({
-      student_id: '',
-      course_id: '',
-      amount: '',
-      due_date: '',
-      status: 'pending'
-    });
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    try {
-      if (editingFee) {
-        await feeService.update(editingFee.id, formData);
-      } else {
-        await feeService.create(formData);
-      }
-      handleClose();
-      fetchData();
-    } catch (error) {
-      console.error('Error saving fee:', error);
-      setError('Failed to save fee');
-    }
-  };
-
-  const handleDelete = async (id) => {
-    if (window.confirm('Are you sure you want to delete this fee?')) {
-      try {
-        await feeService.delete(id);
-        fetchData();
-      } catch (error) {
-        console.error('Error deleting fee:', error);
-        setError('Failed to delete fee');
-      }
-    }
-  };
-
-  const handleChange = (e) => {
+  const handleInputChange = (e) => {
     setFormData({
       ...formData,
       [e.target.name]: e.target.value
     });
   };
 
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    
+    try {
+      if (editingFee) {
+        await axios.put(`/api/fees/${editingFee.id}`, formData);
+        toast.success('Fee record updated successfully');
+      } else {
+        await axios.post('/api/fees', formData);
+        toast.success('Fee record created successfully');
+      }
+      
+      setShowModal(false);
+      setEditingFee(null);
+      setFormData({ student_id: '', course_id: '', total_amount: '', due_date: '' });
+      fetchData();
+    } catch (error) {
+      console.error('Error saving fee:', error);
+      toast.error(error.response?.data?.message || 'Failed to save fee record');
+    }
+  };
+
+  const handleEdit = (fee) => {
+    setEditingFee(fee);
+    setFormData({
+      student_id: fee.student_id,
+      course_id: fee.course_id || '',
+      total_amount: fee.total_amount,
+      due_date: fee.due_date || ''
+    });
+    setShowModal(true);
+  };
+
+  const handleDelete = async (feeId) => {
+    if (window.confirm('Are you sure you want to delete this fee record?')) {
+      try {
+        await axios.delete(`/api/fees/${feeId}`);
+        toast.success('Fee record deleted successfully');
+        fetchData();
+      } catch (error) {
+        console.error('Error deleting fee:', error);
+        toast.error(error.response?.data?.message || 'Failed to delete fee record');
+      }
+    }
+  };
+
+  const openModal = () => {
+    setEditingFee(null);
+    setFormData({ student_id: '', course_id: '', total_amount: '', due_date: '' });
+    setShowModal(true);
+  };
+
+  const closeModal = () => {
+    setShowModal(false);
+    setEditingFee(null);
+    setFormData({ student_id: '', course_id: '', total_amount: '', due_date: '' });
+  };
+
   const getStatusColor = (status) => {
     switch (status) {
-      case 'paid': return 'success';
-      case 'pending': return 'warning';
-      case 'overdue': return 'error';
-      default: return 'default';
+      case 'paid':
+        return 'bg-green-100 text-green-800';
+      case 'partial':
+        return 'bg-yellow-100 text-yellow-800';
+      case 'pending':
+        return 'bg-red-100 text-red-800';
+      default:
+        return 'bg-gray-100 text-gray-800';
     }
   };
 
   if (loading) {
     return (
-      <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
-        <CircularProgress />
-      </Box>
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
+      </div>
     );
   }
 
   return (
-    <Box>
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-        <Typography variant="h4">Fees Management</Typography>
-        <Button
-          variant="contained"
-          startIcon={<AddIcon />}
-          onClick={() => handleOpen()}
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Fees</h1>
+          <p className="mt-1 text-sm text-gray-500">
+            Manage student fee records and payment tracking
+          </p>
+        </div>
+        <button
+          onClick={openModal}
+          className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
         >
-          Assign Fee
-        </Button>
-      </Box>
+          <Plus className="h-4 w-4 mr-2" />
+          Add Fee Record
+        </button>
+      </div>
 
-      {error && (
-        <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>
-          {error}
-        </Alert>
+      {/* Fees List */}
+      {fees.length === 0 ? (
+        <div className="text-center py-12">
+          <DollarSign className="mx-auto h-12 w-12 text-gray-400" />
+          <h3 className="mt-2 text-sm font-medium text-gray-900">No fee records</h3>
+          <p className="mt-1 text-sm text-gray-500">Get started by adding a fee record for a student.</p>
+          <div className="mt-6">
+            <button
+              onClick={openModal}
+              className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-primary-600 hover:bg-primary-700"
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              Add Fee Record
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="bg-white shadow overflow-hidden sm:rounded-md">
+          <ul className="divide-y divide-gray-200">
+            {fees.map((fee) => (
+              <li key={fee.id}>
+                <div className="px-4 py-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center">
+                      <div className="flex-shrink-0">
+                        <div className="h-10 w-10 rounded-full bg-primary-100 flex items-center justify-center">
+                          <DollarSign className="h-5 w-5 text-primary-600" />
+                        </div>
+                      </div>
+                      <div className="ml-4">
+                        <div className="flex items-center">
+                          <p className="text-sm font-medium text-gray-900">{fee.student_name}</p>
+                          <span className={`ml-2 inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getStatusColor(fee.status)}`}>
+                            {fee.status}
+                          </span>
+                        </div>
+                        <div className="mt-1 text-sm text-gray-500">
+                          Course: {fee.course_name || 'Not specified'}
+                          {fee.student_phone && (
+                            <span className="ml-2">• Phone: {fee.student_phone}</span>
+                          )}
+                        </div>
+                        {fee.due_date && (
+                          <div className="mt-1 text-sm text-gray-500">
+                            Due Date: {new Date(fee.due_date).toLocaleDateString()}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center space-x-4">
+                      <div className="text-right">
+                        <div className="text-sm font-medium text-gray-900">
+                          Total: ₹{parseFloat(fee.total_amount).toLocaleString()}
+                        </div>
+                        <div className="text-sm text-gray-500">
+                          Paid: ₹{parseFloat(fee.paid_amount).toLocaleString()}
+                        </div>
+                        <div className="text-sm font-medium text-red-600">
+                          Pending: ₹{parseFloat(fee.pending_amount).toLocaleString()}
+                        </div>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <button
+                          onClick={() => handleEdit(fee)}
+                          className="text-primary-600 hover:text-primary-900"
+                        >
+                          <Edit className="h-4 w-4" />
+                        </button>
+                        <button
+                          onClick={() => handleDelete(fee.id)}
+                          className="text-red-600 hover:text-red-900"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
 
-      {/* Summary Cards */}
-      <Grid container spacing={3} sx={{ mb: 3 }}>
-        <Grid item xs={12} sm={4}>
-          <Card>
-            <CardContent>
-              <Typography color="textSecondary" gutterBottom>
-                Pending Fees
-              </Typography>
-              <Typography variant="h4">
-                {summary.total_pending_fees}
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={12} sm={4}>
-          <Card>
-            <CardContent>
-              <Typography color="textSecondary" gutterBottom>
-                Total Pending Amount
-              </Typography>
-              <Typography variant="h4" color="warning.main">
-                ₹{summary.total_pending_amount?.toLocaleString() || 0}
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={12} sm={4}>
-          <Card>
-            <CardContent>
-              <Typography color="textSecondary" gutterBottom>
-                Students with Pending Fees
-              </Typography>
-              <Typography variant="h4" color="error.main">
-                {summary.students_with_pending_fees}
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
-
-      <TableContainer component={Paper}>
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableCell>Student</TableCell>
-              <TableCell>Phone</TableCell>
-              <TableCell>Course</TableCell>
-              <TableCell>Amount</TableCell>
-              <TableCell>Due Date</TableCell>
-              <TableCell>Status</TableCell>
-              <TableCell>Actions</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {fees.map((fee) => (
-              <TableRow key={fee.id}>
-                <TableCell>{fee.student_name}</TableCell>
-                <TableCell>{fee.student_phone}</TableCell>
-                <TableCell>
-                  {fee.course_name ? (
-                    <Chip label={fee.course_name} size="small" color="primary" />
-                  ) : (
-                    <Chip label="No course" size="small" variant="outlined" />
-                  )}
-                </TableCell>
-                <TableCell>₹{fee.amount}</TableCell>
-                <TableCell>
-                  {new Date(fee.due_date).toLocaleDateString()}
-                </TableCell>
-                <TableCell>
-                  <Chip 
-                    label={fee.status} 
-                    size="small" 
-                    color={getStatusColor(fee.status)}
+      {/* Modal */}
+      {showModal && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+          <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+            <div className="mt-3">
+              <h3 className="text-lg font-medium text-gray-900 mb-4">
+                {editingFee ? 'Edit Fee Record' : 'Add New Fee Record'}
+              </h3>
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">
+                    Student *
+                  </label>
+                  <select
+                    name="student_id"
+                    required
+                    value={formData.student_id}
+                    onChange={handleInputChange}
+                    className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
+                  >
+                    <option value="">Select a student</option>
+                    {students.map((student) => (
+                      <option key={student.id} value={student.id}>
+                        {student.name} - {student.phone}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">
+                    Course
+                  </label>
+                  <select
+                    name="course_id"
+                    value={formData.course_id}
+                    onChange={handleInputChange}
+                    className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
+                  >
+                    <option value="">Select a course</option>
+                    {courses.map((course) => (
+                      <option key={course.id} value={course.id}>
+                        {course.name} - ₹{parseFloat(course.fee_amount).toLocaleString()}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">
+                    Total Amount (₹) *
+                  </label>
+                  <input
+                    type="number"
+                    name="total_amount"
+                    required
+                    min="0"
+                    step="0.01"
+                    value={formData.total_amount}
+                    onChange={handleInputChange}
+                    className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
                   />
-                </TableCell>
-                <TableCell>
-                  <IconButton onClick={() => handleOpen(fee)} color="primary">
-                    <EditIcon />
-                  </IconButton>
-                  <IconButton onClick={() => handleDelete(fee.id)} color="error">
-                    <DeleteIcon />
-                  </IconButton>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </TableContainer>
-
-      <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
-        <DialogTitle>
-          {editingFee ? 'Edit Fee' : 'Assign New Fee'}
-        </DialogTitle>
-        <form onSubmit={handleSubmit}>
-          <DialogContent>
-            <FormControl fullWidth margin="dense">
-              <InputLabel>Student</InputLabel>
-              <Select
-                name="student_id"
-                value={formData.student_id}
-                onChange={handleChange}
-                label="Student"
-                required
-              >
-                <MenuItem value="">
-                  <em>Select a student</em>
-                </MenuItem>
-                {students.map((student) => (
-                  <MenuItem key={student.id} value={student.id}>
-                    {student.name} ({student.email})
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-            <FormControl fullWidth margin="dense">
-              <InputLabel>Course</InputLabel>
-              <Select
-                name="course_id"
-                value={formData.course_id}
-                onChange={handleChange}
-                label="Course"
-              >
-                <MenuItem value="">
-                  <em>Select a course</em>
-                </MenuItem>
-                {courses.map((course) => (
-                  <MenuItem key={course.id} value={course.id}>
-                    {course.name}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-            <TextField
-              margin="dense"
-              name="amount"
-              label="Fee Amount (₹)"
-              type="number"
-              fullWidth
-              variant="outlined"
-              value={formData.amount}
-              onChange={handleChange}
-              required
-            />
-            <TextField
-              margin="dense"
-              name="due_date"
-              label="Due Date"
-              type="date"
-              fullWidth
-              variant="outlined"
-              value={formData.due_date}
-              onChange={handleChange}
-              required
-              InputLabelProps={{
-                shrink: true,
-              }}
-            />
-            <FormControl fullWidth margin="dense">
-              <InputLabel>Status</InputLabel>
-              <Select
-                name="status"
-                value={formData.status}
-                onChange={handleChange}
-                label="Status"
-              >
-                <MenuItem value="pending">Pending</MenuItem>
-                <MenuItem value="paid">Paid</MenuItem>
-                <MenuItem value="overdue">Overdue</MenuItem>
-              </Select>
-            </FormControl>
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={handleClose}>Cancel</Button>
-            <Button type="submit" variant="contained">
-              {editingFee ? 'Update' : 'Assign'}
-            </Button>
-          </DialogActions>
-        </form>
-      </Dialog>
-    </Box>
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">
+                    Due Date
+                  </label>
+                  <input
+                    type="date"
+                    name="due_date"
+                    value={formData.due_date}
+                    onChange={handleInputChange}
+                    className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
+                  />
+                </div>
+                
+                <div className="flex justify-end space-x-3 pt-4">
+                  <button
+                    type="button"
+                    onClick={closeModal}
+                    className="px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700"
+                  >
+                    {editingFee ? 'Update' : 'Create'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 };
 

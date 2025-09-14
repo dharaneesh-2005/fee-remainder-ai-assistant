@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { authService } from '../services/authService';
+import axios from 'axios';
 
 const AuthContext = createContext();
 
@@ -12,40 +12,70 @@ export const useAuth = () => {
 };
 
 export const AuthProvider = ({ children }) => {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [token, setToken] = useState(localStorage.getItem('token'));
 
+  // Set up axios interceptor for authentication
   useEffect(() => {
-    const token = localStorage.getItem('token');
     if (token) {
-      setUser({ username: 'admin' }); // Simple user object for demo
-      setIsAuthenticated(true);
+      axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+    } else {
+      delete axios.defaults.headers.common['Authorization'];
     }
-    setLoading(false);
-  }, []);
+  }, [token]);
+
+  // Check if user is logged in on app start
+  useEffect(() => {
+    const checkAuth = async () => {
+      if (token) {
+        try {
+          const response = await axios.get('/api/auth/me');
+          setUser(response.data.user);
+        } catch (error) {
+          console.error('Auth check failed:', error);
+          logout();
+        }
+      }
+      setLoading(false);
+    };
+
+    checkAuth();
+  }, [token]);
 
   const login = async (username, password) => {
     try {
-      const response = await authService.login(username, password);
-      localStorage.setItem('token', response.token);
-      setUser(response.user);
-      setIsAuthenticated(true);
+      const response = await axios.post('/api/auth/login', {
+        username,
+        password
+      });
+
+      const { token: newToken, user: userData } = response.data;
+      
+      setToken(newToken);
+      setUser(userData);
+      localStorage.setItem('token', newToken);
+      
       return { success: true };
     } catch (error) {
-      return { success: false, error: error.message };
+      console.error('Login failed:', error);
+      return { 
+        success: false, 
+        message: error.response?.data?.message || 'Login failed' 
+      };
     }
   };
 
   const logout = () => {
-    localStorage.removeItem('token');
+    setToken(null);
     setUser(null);
-    setIsAuthenticated(false);
+    localStorage.removeItem('token');
+    delete axios.defaults.headers.common['Authorization'];
   };
 
   const value = {
-    isAuthenticated,
     user,
+    token,
     login,
     logout,
     loading
@@ -53,7 +83,7 @@ export const AuthProvider = ({ children }) => {
 
   return (
     <AuthContext.Provider value={value}>
-      {!loading && children}
+      {children}
     </AuthContext.Provider>
   );
 };

@@ -1,118 +1,218 @@
 const express = require('express');
-const { authenticate } = require('../middleware/auth');
-const { pool } = require('../config/database');
 const twilio = require('twilio');
 const Groq = require('groq-sdk');
+const pool = require('../config/database');
+const { authenticateToken } = require('../middleware/auth');
 
 const router = express.Router();
 
-// Apply authentication to all routes
-router.use(authenticate);
+// Initialize Twilio client
+const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
 
-// Initialize Twilio client with error handling
-let twilioClient = null;
-let groq = null;
+// Initialize Groq client
+const groq = new Groq({
+  apiKey: process.env.GROQ_API_KEY,
+});
 
-try {
-  if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
-    twilioClient = twilio(
-      process.env.TWILIO_ACCOUNT_SID,
-      process.env.TWILIO_AUTH_TOKEN
-    );
-    console.log('✅ Twilio client initialized');
-  } else {
-    console.warn('⚠️ Twilio credentials not found in environment variables');
-  }
-} catch (error) {
-  console.error('❌ Failed to initialize Twilio client:', error.message);
-}
-
-// Initialize Groq client with error handling
-try {
-  if (process.env.GROQ_API_KEY) {
-    groq = new Groq({
-      apiKey: process.env.GROQ_API_KEY
-    });
-    console.log('✅ Groq client initialized');
-  } else {
-    console.warn('⚠️ Groq API key not found in environment variables');
-  }
-} catch (error) {
-  console.error('❌ Failed to initialize Groq client:', error.message);
-}
+// Rate limiting for calls (1.1 seconds between calls)
+let lastCallTime = 0;
+const CALL_INTERVAL = 1100; // 1.1 seconds in milliseconds
 
 // Get all reminders
-router.get('/', async (req, res) => {
+router.get('/', authenticateToken, async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT r.*, s.name as student_name, s.phone as student_phone, s.email as student_email,
-             f.amount as fee_amount, f.due_date
+      SELECT 
+        r.*,
+        s.name as student_name,
+        s.phone as student_phone,
+        s.email as student_email,
+        f.pending_amount,
+        f.total_amount,
+        c.name as course_name
       FROM reminders r
       JOIN students s ON r.student_id = s.id
-      LEFT JOIN fees f ON r.fee_id = f.id
+      JOIN fees f ON r.fee_id = f.id
+      LEFT JOIN courses c ON f.course_id = c.id
       ORDER BY r.created_at DESC
     `);
     res.json(result.rows);
   } catch (error) {
     console.error('Error fetching reminders:', error);
-    res.status(500).json({ error: 'Failed to fetch reminders' });
+    res.status(500).json({ message: 'Error fetching reminders' });
   }
 });
 
-// Send reminder to all students with pending fees
-router.post('/send-all', async (req, res) => {
+// Get reminder by ID
+router.get('/:id', authenticateToken, async (req, res) => {
   try {
-    if (!twilioClient) {
-      return res.status(503).json({ error: 'Twilio service not available. Please check configuration.' });
+    const { id } = req.params;
+    const result = await pool.query(`
+      SELECT 
+        r.*,
+        s.name as student_name,
+        s.phone as student_phone,
+        s.email as student_email,
+        f.pending_amount,
+        f.total_amount,
+        c.name as course_name
+      FROM reminders r
+      JOIN students s ON r.student_id = s.id
+      JOIN fees f ON r.fee_id = f.id
+      LEFT JOIN courses c ON f.course_id = c.id
+      WHERE r.id = $1
+    `, [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Reminder not found' });
     }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error fetching reminder:', error);
+    res.status(500).json({ message: 'Error fetching reminder' });
+  }
+});
+
+// Send reminder to a specific student
+router.post('/send/:studentId', authenticateToken, async (req, res) => {
+  try {
+    const { studentId } = req.params;
+
+    // Get student with fee information
+    const studentResult = await pool.query(`
+      SELECT 
+        s.*,
+        f.id as fee_id,
+        f.pending_amount,
+        f.total_amount,
+        f.due_date,
+        c.name as course_name
+      FROM students s
+      JOIN fees f ON s.id = f.student_id
+      LEFT JOIN courses c ON f.course_id = c.id
+      WHERE s.id = $1 AND f.pending_amount > 0
+    `, [studentId]);
+
+    if (studentResult.rows.length === 0) {
+      return res.status(404).json({ message: 'Student not found or no pending fees' });
+    }
+
+    const student = studentResult.rows[0];
+
+    // Rate limiting check
+    const currentTime = Date.now();
+    const timeSinceLastCall = currentTime - lastCallTime;
+    
+    if (timeSinceLastCall < CALL_INTERVAL) {
+      const waitTime = CALL_INTERVAL - timeSinceLastCall;
+      return res.status(429).json({ 
+        message: `Please wait ${Math.ceil(waitTime / 1000)} seconds before making another call`,
+        waitTime: waitTime
+      });
+    }
+
+    // Create reminder record
+    const reminderResult = await pool.query(
+      'INSERT INTO reminders (student_id, fee_id, call_status) VALUES ($1, $2, $3) RETURNING *',
+      [studentId, student.fee_id, 'initiated']
+    );
+
+    const reminder = reminderResult.rows[0];
+
+    // Make Twilio call
+    const call = await twilioClient.calls.create({
+      twiml: `<Response>
+        <Say>Hello ${student.name}, this is a payment reminder. You have a pending fee of ${student.pending_amount} rupees for ${student.course_name || 'your course'}. Please make the payment as soon as possible. Do you have any questions?</Say>
+        <Record maxLength="30" action="/api/reminders/handle-response/${reminder.id}" method="POST" />
+      </Response>`,
+      to: student.phone,
+      from: process.env.TWILIO_PHONE_NUMBER
+    });
+
+    // Update reminder with call SID
+    await pool.query(
+      'UPDATE reminders SET call_status = $1 WHERE id = $2',
+      ['calling', reminder.id]
+    );
+
+    lastCallTime = currentTime;
+
+    res.json({
+      message: 'Reminder call initiated',
+      reminder: reminder,
+      callSid: call.sid,
+      student: {
+        name: student.name,
+        phone: student.phone,
+        pending_amount: student.pending_amount,
+        course_name: student.course_name
+      }
+    });
+  } catch (error) {
+    console.error('Error sending reminder:', error);
+    res.status(500).json({ message: 'Error sending reminder' });
+  }
+});
+
+// Send reminders to all students with pending fees
+router.post('/send-all', authenticateToken, async (req, res) => {
+  try {
     // Get all students with pending fees
     const studentsResult = await pool.query(`
-      SELECT DISTINCT s.*, c.name as course_name,
-             COALESCE(SUM(f.amount), 0) as total_pending_amount,
-             STRING_AGG(f.id::text, ',') as fee_ids
+      SELECT 
+        s.*,
+        f.id as fee_id,
+        f.pending_amount,
+        f.total_amount,
+        f.due_date,
+        c.name as course_name
       FROM students s
-      LEFT JOIN courses c ON s.course_id = c.id
-      LEFT JOIN fees f ON s.id = f.student_id AND f.status = 'pending'
-      GROUP BY s.id, s.name, s.email, s.phone, s.department, s.course_id, s.enrollment_date, s.created_at, s.updated_at, c.name
-      HAVING COALESCE(SUM(f.amount), 0) > 0
-      ORDER BY s.name
+      JOIN fees f ON s.id = f.student_id
+      LEFT JOIN courses c ON f.course_id = c.id
+      WHERE f.pending_amount > 0 AND f.status = 'pending'
+      ORDER BY f.due_date ASC
     `);
+
+    if (studentsResult.rows.length === 0) {
+      return res.json({ message: 'No students with pending fees found' });
+    }
 
     const students = studentsResult.rows;
     const results = [];
 
-    // Process each student with rate limiting (1.1s delay between calls)
     for (let i = 0; i < students.length; i++) {
       const student = students[i];
       
+      // Rate limiting - wait between calls
+      if (i > 0) {
+        const waitTime = CALL_INTERVAL;
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+      }
+
       try {
         // Create reminder record
         const reminderResult = await pool.query(
-          'INSERT INTO reminders (student_id, fee_id, status) VALUES ($1, $2, $3) RETURNING *',
-          [student.id, student.fee_ids ? student.fee_ids.split(',')[0] : null, 'initiated']
+          'INSERT INTO reminders (student_id, fee_id, call_status) VALUES ($1, $2, $3) RETURNING *',
+          [student.id, student.fee_id, 'initiated']
         );
 
-        // Prepare student context for AI
-        const studentContext = {
-          name: student.name,
-          phone: student.phone,
-          email: student.email,
-          department: student.department,
-          course: student.course_name,
-          pendingAmount: student.total_pending_amount
-        };
+        const reminder = reminderResult.rows[0];
 
         // Make Twilio call
         const call = await twilioClient.calls.create({
-          twiml: generateTwiml(studentContext),
+          twiml: `<Response>
+            <Say>Hello ${student.name}, this is a payment reminder. You have a pending fee of ${student.pending_amount} rupees for ${student.course_name || 'your course'}. Please make the payment as soon as possible. Do you have any questions?</Say>
+            <Record maxLength="30" action="/api/reminders/handle-response/${reminder.id}" method="POST" />
+          </Response>`,
           to: student.phone,
           from: process.env.TWILIO_PHONE_NUMBER
         });
 
         // Update reminder with call SID
         await pool.query(
-          'UPDATE reminders SET call_sid = $1, status = $2 WHERE id = $3',
-          [call.sid, 'calling', reminderResult.rows[0].id]
+          'UPDATE reminders SET call_status = $1 WHERE id = $2',
+          ['calling', reminder.id]
         );
 
         results.push({
@@ -121,316 +221,183 @@ router.post('/send-all', async (req, res) => {
           callSid: call.sid,
           status: 'initiated'
         });
-
-        // Rate limiting: wait 1.1 seconds between calls
-        if (i < students.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, 1100));
-        }
-
       } catch (error) {
         console.error(`Error calling student ${student.name}:`, error);
         results.push({
           student: student.name,
           phone: student.phone,
-          error: error.message,
-          status: 'failed'
+          status: 'failed',
+          error: error.message
         });
       }
     }
 
     res.json({
-      message: `Reminder calls initiated for ${students.length} students`,
-      results
+      message: `Initiated calls to ${results.length} students`,
+      results: results
     });
-
   } catch (error) {
-    console.error('Error sending reminders:', error);
-    res.status(500).json({ error: 'Failed to send reminders' });
+    console.error('Error sending bulk reminders:', error);
+    res.status(500).json({ message: 'Error sending bulk reminders' });
   }
 });
 
-// Generate TwiML for the call
-function generateTwiml(studentContext) {
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Say voice="alice">
-    Hello ${studentContext.name}, this is a reminder from your educational institution. 
-    You have a pending fee of ${studentContext.pendingAmount} rupees for your ${studentContext.course} course. 
-    Please make the payment as soon as possible. 
-    If you have any questions, please ask now, otherwise press any key to end the call.
-  </Say>
-  <Gather numDigits="1" action="/api/reminders/handle-response" method="POST">
-    <Say voice="alice">Please press any key if you have a question, or wait to end the call.</Say>
-  </Gather>
-  <Say voice="alice">Thank you for your time. Goodbye.</Say>
-  <Hangup/>
-</Response>`;
-}
-
-// Handle call response and AI interaction
-router.post('/handle-response', async (req, res) => {
+// Handle Twilio webhook for call response
+router.post('/handle-response/:reminderId', async (req, res) => {
   try {
-    const { CallSid, From, Digits } = req.body;
-    
-    // Find the reminder record
-    const reminderResult = await pool.query(
-      'SELECT r.*, s.*, c.name as course_name FROM reminders r JOIN students s ON r.student_id = s.id LEFT JOIN courses c ON s.course_id = c.id WHERE r.call_sid = $1',
-      [CallSid]
-    );
+    const { reminderId } = req.params;
+    const { RecordingUrl, CallSid } = req.body;
+
+    // Get reminder with student information
+    const reminderResult = await pool.query(`
+      SELECT 
+        r.*,
+        s.name as student_name,
+        s.phone as student_phone,
+        f.pending_amount,
+        f.total_amount,
+        c.name as course_name
+      FROM reminders r
+      JOIN students s ON r.student_id = s.id
+      JOIN fees f ON r.fee_id = f.id
+      LEFT JOIN courses c ON f.course_id = c.id
+      WHERE r.id = $1
+    `, [reminderId]);
 
     if (reminderResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Reminder not found' });
+      return res.status(404).send('Reminder not found');
     }
 
     const reminder = reminderResult.rows[0];
 
-    if (Digits) {
-      // Student pressed a key, start AI conversation
-      const twiml = await generateAIConversation(reminder);
-      res.type('text/xml').send(twiml);
-    } else {
-      // No response, end call
-      await pool.query(
-        'UPDATE reminders SET status = $1, call_duration = $2 WHERE call_sid = $3',
-        ['completed', 30, CallSid] // Assuming 30 seconds for basic call
-      );
-      
-      res.type('text/xml').send(`
-        <?xml version="1.0" encoding="UTF-8"?>
-        <Response>
-          <Say voice="alice">Thank you for your time. Goodbye.</Say>
-          <Hangup/>
-        </Response>
-      `);
-    }
+    if (RecordingUrl) {
+      // Transcribe the recording using Groq Whisper
+      try {
+        const transcription = await transcribeAudio(RecordingUrl);
+        
+        // Get AI response using Groq
+        const aiResponse = await getAIResponse(transcription, reminder);
+        
+        // Log the call
+        await pool.query(
+          'INSERT INTO call_logs (reminder_id, student_id, call_sid, transcription, ai_response) VALUES ($1, $2, $3, $4, $5)',
+          [reminderId, reminder.student_id, CallSid, transcription, aiResponse]
+        );
 
+        // Update reminder
+        await pool.query(
+          'UPDATE reminders SET call_status = $1, ai_response = $2 WHERE id = $3',
+          ['completed', aiResponse, reminderId]
+        );
+
+        // Generate TwiML response
+        const twiml = new twilio.twiml.VoiceResponse();
+        
+        if (aiResponse.includes('escalate') || aiResponse.includes('mentor')) {
+          twiml.say('I understand you need more help. Let me connect you with a mentor.');
+          // Here you would add logic to connect to a mentor
+          twiml.say('Please hold while I transfer you to our support team.');
+        } else {
+          twiml.say(aiResponse);
+        }
+        
+        twiml.say('Thank you for your time. Have a great day!');
+        twiml.hangup();
+
+        res.type('text/xml');
+        res.send(twiml.toString());
+      } catch (error) {
+        console.error('Error processing call response:', error);
+        
+        const twiml = new twilio.twiml.VoiceResponse();
+        twiml.say('I apologize, but I had trouble understanding your response. Please contact our support team for assistance.');
+        twiml.hangup();
+        
+        res.type('text/xml');
+        res.send(twiml.toString());
+      }
+    } else {
+      // No recording, just hang up
+      const twiml = new twilio.twiml.VoiceResponse();
+      twiml.say('Thank you for your time. Have a great day!');
+      twiml.hangup();
+      
+      res.type('text/xml');
+      res.send(twiml.toString());
+    }
   } catch (error) {
     console.error('Error handling call response:', error);
-    res.type('text/xml').send(`
-      <?xml version="1.0" encoding="UTF-8"?>
-      <Response>
-        <Say voice="alice">Sorry, there was an error. Goodbye.</Say>
-        <Hangup/>
-      </Response>
-    `);
+    res.status(500).send('Error processing call');
   }
 });
 
-// Generate AI conversation TwiML
-async function generateAIConversation(student) {
+// Helper function to transcribe audio using Groq Whisper
+async function transcribeAudio(audioUrl) {
   try {
-    if (!groq) {
-      return `<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Say voice="alice">I'm sorry, I'm having trouble right now. Let me connect you to a mentor.</Say>
-  <Redirect>/api/reminders/connect-mentor</Redirect>
-</Response>`;
-    }
-    // Prepare context for Groq AI
-    const context = `
-      Student Information:
-      - Name: ${student.name}
-      - Phone: ${student.phone}
-      - Email: ${student.email}
-      - Department: ${student.department}
-      - Course: ${student.course_name}
-      - Pending Fee: ${student.total_pending_amount || 'Unknown amount'}
-      
-      You are a helpful AI assistant for fee collection. The student has a pending fee and may have questions.
-      Keep responses brief and helpful. If you cannot answer a question, offer to connect them to a mentor.
-      Be polite and professional.
-    `;
-
-    const completion = await groq.chat.completions.create({
-      messages: [
-        {
-          role: "system",
-          content: context
-        },
-        {
-          role: "user",
-          content: "The student has pressed a key indicating they have a question. Generate a brief response asking what they need help with."
-        }
-      ],
-      model: "llama3-8b-8192", // Fast model for quick responses
-      temperature: 0.7,
-      max_tokens: 100
-    });
-
-    const aiResponse = completion.choices[0]?.message?.content || "How can I help you with your fee payment?";
-
-    return `<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Say voice="alice">${aiResponse}</Say>
-  <Gather numDigits="1" action="/api/reminders/ai-response" method="POST" timeout="10">
-    <Say voice="alice">Please press any key to continue or wait to end the call.</Say>
-  </Gather>
-  <Say voice="alice">Thank you for your time. Goodbye.</Say>
-  <Hangup/>
-</Response>`;
-
-  } catch (error) {
-    console.error('Error generating AI response:', error);
-    return `<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Say voice="alice">I'm sorry, I'm having trouble right now. Let me connect you to a mentor.</Say>
-  <Redirect>/api/reminders/connect-mentor</Redirect>
-</Response>`;
-  }
-}
-
-// Handle AI conversation continuation
-router.post('/ai-response', async (req, res) => {
-  try {
-    const { CallSid, From, SpeechResult } = req.body;
+    // Download the audio file
+    const response = await fetch(audioUrl);
+    const audioBuffer = await response.arrayBuffer();
     
-    // Find the reminder record
-    const reminderResult = await pool.query(
-      'SELECT r.*, s.*, c.name as course_name FROM reminders r JOIN students s ON r.student_id = s.id LEFT JOIN courses c ON s.course_id = c.id WHERE r.call_sid = $1',
-      [CallSid]
-    );
-
-    if (reminderResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Reminder not found' });
-    }
-
-    const reminder = reminderResult.rows[0];
-
-    if (SpeechResult) {
-      // Process the speech with Groq AI
-      const aiResponse = await processStudentQuestion(reminder, SpeechResult);
-      
-      // Update reminder with AI response
-      await pool.query(
-        'UPDATE reminders SET ai_response = $1 WHERE call_sid = $2',
-        [aiResponse, CallSid]
-      );
-
-      res.type('text/xml').send(`
-        <?xml version="1.0" encoding="UTF-8"?>
-        <Response>
-          <Say voice="alice">${aiResponse}</Say>
-          <Gather numDigits="1" action="/api/reminders/ai-response" method="POST" timeout="10">
-            <Say voice="alice">Do you have any other questions? Press any key to continue or wait to end the call.</Say>
-          </Gather>
-          <Say voice="alice">Thank you for your time. Goodbye.</Say>
-          <Hangup/>
-        </Response>
-      `);
-    } else {
-      // No speech detected, end call
-      await pool.query(
-        'UPDATE reminders SET status = $1 WHERE call_sid = $2',
-        ['completed', CallSid]
-      );
-      
-      res.type('text/xml').send(`
-        <?xml version="1.0" encoding="UTF-8"?>
-        <Response>
-          <Say voice="alice">Thank you for your time. Goodbye.</Say>
-          <Hangup/>
-        </Response>
-      `);
-    }
-
-  } catch (error) {
-    console.error('Error handling AI response:', error);
-    res.type('text/xml').send(`
-      <?xml version="1.0" encoding="UTF-8"?>
-      <Response>
-        <Say voice="alice">I'm sorry, I'm having trouble. Let me connect you to a mentor.</Say>
-        <Redirect>/api/reminders/connect-mentor</Redirect>
-      </Response>
-    `);
-  }
-});
-
-// Process student question with Groq AI
-async function processStudentQuestion(student, question) {
-  try {
-    if (!groq) {
-      return "I'm sorry, I'm having trouble understanding. Let me connect you to a mentor who can help you.";
-    }
-    const context = `
-      Student Information:
-      - Name: ${student.name}
-      - Phone: ${student.phone}
-      - Email: ${student.email}
-      - Department: ${student.department}
-      - Course: ${student.course_name}
-      - Pending Fee: ${student.total_pending_amount || 'Unknown amount'}
-      
-      Student Question: "${question}"
-      
-      You are a helpful AI assistant for fee collection. Answer the student's question briefly and helpfully.
-      If you cannot answer the question or if the student seems frustrated, offer to connect them to a mentor.
-      Keep responses under 50 words and be professional.
-    `;
-
-    const completion = await groq.chat.completions.create({
-      messages: [
-        {
-          role: "system",
-          content: context
-        },
-        {
-          role: "user",
-          content: question
-        }
-      ],
-      model: "llama3-8b-8192",
-      temperature: 0.7,
-      max_tokens: 100
+    // Use Groq's Whisper API for transcription
+    const transcription = await groq.audio.transcriptions.create({
+      file: new File([audioBuffer], 'recording.wav'),
+      model: 'whisper-large-v3-turbo',
     });
-
-    return completion.choices[0]?.message?.content || "I understand your concern. Let me connect you to a mentor who can help you better.";
-
+    
+    return transcription.text;
   } catch (error) {
-    console.error('Error processing student question:', error);
-    return "I'm sorry, I'm having trouble understanding. Let me connect you to a mentor who can help you.";
+    console.error('Error transcribing audio:', error);
+    throw error;
   }
 }
 
-// Connect to mentor
-router.post('/connect-mentor', async (req, res) => {
+// Helper function to get AI response using Groq
+async function getAIResponse(transcription, reminder) {
   try {
-    // Get available mentor
-    const mentorResult = await pool.query(
-      'SELECT * FROM mentors WHERE is_available = true ORDER BY RANDOM() LIMIT 1'
-    );
+    const systemPrompt = `You are a helpful payment reminder assistant. You have access to the following student information:
+    - Student Name: ${reminder.student_name}
+    - Course: ${reminder.course_name || 'Not specified'}
+    - Pending Amount: ${reminder.pending_amount} rupees
+    - Total Amount: ${reminder.total_amount} rupees
+    
+    Your role is to:
+    1. Answer questions about payment details, due dates, and course information
+    2. Help with payment-related queries
+    3. If the student asks questions you cannot answer or requests to speak with a mentor, respond with "escalate to mentor"
+    4. If the student clearly rejects or says they don't want to pay, acknowledge politely and end the conversation
+    5. Keep responses concise and helpful (under 50 words)
+    
+    If you don't have the information needed to answer a question, respond with "escalate to mentor".`;
 
-    if (mentorResult.rows.length === 0) {
-      res.type('text/xml').send(`
-        <?xml version="1.0" encoding="UTF-8"?>
-        <Response>
-          <Say voice="alice">I'm sorry, no mentors are available right now. Please call back later or contact us directly.</Say>
-          <Hangup/>
-        </Response>
-      `);
-      return;
-    }
+    const completion = await groq.chat.completions.create({
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: transcription }
+      ],
+      model: 'llama-3.1-8b-instant', // Using Groq's fastest model
+      max_tokens: 100,
+      temperature: 0.7,
+    });
 
-    const mentor = mentorResult.rows[0];
-
-    res.type('text/xml').send(`
-      <?xml version="1.0" encoding="UTF-8"?>
-      <Response>
-        <Say voice="alice">I'm connecting you to ${mentor.name}, a mentor from our ${mentor.department} department.</Say>
-        <Dial>${mentor.phone}</Dial>
-        <Say voice="alice">The mentor is not available right now. Please try calling back later.</Say>
-        <Hangup/>
-      </Response>
-    `);
-
+    return completion.choices[0].message.content;
   } catch (error) {
-    console.error('Error connecting to mentor:', error);
-    res.type('text/xml').send(`
-      <?xml version="1.0" encoding="UTF-8"?>
-      <Response>
-        <Say voice="alice">I'm sorry, I cannot connect you to a mentor right now. Please try calling back later.</Say>
-        <Hangup/>
-      </Response>
-    `);
+    console.error('Error getting AI response:', error);
+    return 'I apologize, but I had trouble processing your request. Let me connect you with a mentor.';
+  }
+}
+
+// Get call logs for a reminder
+router.get('/logs/:reminderId', authenticateToken, async (req, res) => {
+  try {
+    const { reminderId } = req.params;
+    const result = await pool.query(
+      'SELECT * FROM call_logs WHERE reminder_id = $1 ORDER BY created_at DESC',
+      [reminderId]
+    );
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching call logs:', error);
+    res.status(500).json({ message: 'Error fetching call logs' });
   }
 });
 

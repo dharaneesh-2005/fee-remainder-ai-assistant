@@ -1,42 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import {
-  Box,
-  Typography,
-  Button,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Alert,
-  CircularProgress,
-  Chip,
-  Grid,
-  Card,
-  CardContent,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  LinearProgress
-} from '@mui/material';
-import {
-  Phone as PhoneIcon,
-  CheckCircle as CheckCircleIcon,
-  Error as ErrorIcon,
-  Schedule as ScheduleIcon
-} from '@mui/icons-material';
-import { reminderService, studentService } from '../services/authService';
+import axios from 'axios';
+import { toast } from 'react-toastify';
+import { Phone, PhoneCall, Clock, CheckCircle, XCircle, AlertCircle, Play } from 'lucide-react';
 
 const Reminders = () => {
   const [reminders, setReminders] = useState([]);
-  const [studentsWithPendingFees, setStudentsWithPendingFees] = useState([]);
+  const [pendingFees, setPendingFees] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [sending, setSending] = useState(false);
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
-  const [confirmDialog, setConfirmDialog] = useState(false);
+  const [calling, setCalling] = useState(false);
+  const [callProgress, setCallProgress] = useState({});
 
   useEffect(() => {
     fetchData();
@@ -44,335 +16,304 @@ const Reminders = () => {
 
   const fetchData = async () => {
     try {
-      setLoading(true);
-      const [remindersRes, studentsRes] = await Promise.all([
-        reminderService.getAll(),
-        studentService.getPendingFees()
+      const [remindersRes, feesRes] = await Promise.all([
+        axios.get('/api/reminders'),
+        axios.get('/api/fees/pending/list')
       ]);
       setReminders(remindersRes.data);
-      setStudentsWithPendingFees(studentsRes.data);
+      setPendingFees(feesRes.data);
     } catch (error) {
       console.error('Error fetching data:', error);
-      setError('Failed to load data');
+      toast.error('Failed to fetch data');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSendReminders = async () => {
+  const sendReminderToStudent = async (studentId) => {
     try {
-      setSending(true);
-      setError('');
-      setSuccess('');
+      setCalling(true);
+      setCallProgress(prev => ({ ...prev, [studentId]: 'calling' }));
       
-      const response = await reminderService.sendAll();
+      const response = await axios.post(`/api/reminders/send/${studentId}`);
       
-      setSuccess(`Reminder calls initiated for ${response.data.results.length} students`);
-      setConfirmDialog(false);
+      setCallProgress(prev => ({ ...prev, [studentId]: 'completed' }));
+      toast.success(`Reminder call initiated for ${response.data.student.name}`);
       
       // Refresh data after a short delay
       setTimeout(() => {
         fetchData();
+        setCallProgress(prev => ({ ...prev, [studentId]: null }));
       }, 2000);
       
     } catch (error) {
-      console.error('Error sending reminders:', error);
-      setError('Failed to send reminders');
-      setConfirmDialog(false);
+      console.error('Error sending reminder:', error);
+      setCallProgress(prev => ({ ...prev, [studentId]: 'failed' }));
+      
+      if (error.response?.status === 429) {
+        const waitTime = Math.ceil(error.response.data.waitTime / 1000);
+        toast.error(`Please wait ${waitTime} seconds before making another call`);
+      } else {
+        toast.error(error.response?.data?.message || 'Failed to send reminder');
+      }
+      
+      setTimeout(() => {
+        setCallProgress(prev => ({ ...prev, [studentId]: null }));
+      }, 3000);
     } finally {
-      setSending(false);
+      setCalling(false);
     }
   };
 
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'completed': return 'success';
-      case 'calling': return 'info';
-      case 'initiated': return 'warning';
-      case 'failed': return 'error';
-      default: return 'default';
+  const sendRemindersToAll = async () => {
+    if (pendingFees.length === 0) {
+      toast.info('No students with pending fees found');
+      return;
+    }
+
+    if (window.confirm(`Are you sure you want to call all ${pendingFees.length} students with pending fees? This will take approximately ${Math.ceil(pendingFees.length * 1.1)} seconds.`)) {
+      try {
+        setCalling(true);
+        toast.info('Initiating calls to all students...');
+        
+        const response = await axios.post('/api/reminders/send-all');
+        
+        toast.success(`Initiated calls to ${response.data.results.length} students`);
+        
+        // Refresh data after a delay
+        setTimeout(() => {
+          fetchData();
+        }, 5000);
+        
+      } catch (error) {
+        console.error('Error sending bulk reminders:', error);
+        toast.error('Failed to send bulk reminders');
+      } finally {
+        setCalling(false);
+      }
     }
   };
 
   const getStatusIcon = (status) => {
     switch (status) {
-      case 'completed': return <CheckCircleIcon />;
-      case 'calling': return <PhoneIcon />;
-      case 'initiated': return <ScheduleIcon />;
-      case 'failed': return <ErrorIcon />;
-      default: return <ScheduleIcon />;
+      case 'completed':
+        return <CheckCircle className="h-4 w-4 text-green-500" />;
+      case 'calling':
+        return <PhoneCall className="h-4 w-4 text-blue-500 animate-pulse" />;
+      case 'failed':
+        return <XCircle className="h-4 w-4 text-red-500" />;
+      case 'initiated':
+        return <Clock className="h-4 w-4 text-yellow-500" />;
+      default:
+        return <AlertCircle className="h-4 w-4 text-gray-500" />;
+    }
+  };
+
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'completed':
+        return 'bg-green-100 text-green-800';
+      case 'calling':
+        return 'bg-blue-100 text-blue-800';
+      case 'failed':
+        return 'bg-red-100 text-red-800';
+      case 'initiated':
+        return 'bg-yellow-100 text-yellow-800';
+      default:
+        return 'bg-gray-100 text-gray-800';
     }
   };
 
   if (loading) {
     return (
-      <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
-        <CircularProgress />
-      </Box>
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
+      </div>
     );
   }
 
   return (
-    <Box>
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-        <Typography variant="h4">AI-Powered Reminders</Typography>
-        <Button
-          variant="contained"
-          color="primary"
-          size="large"
-          startIcon={<PhoneIcon />}
-          onClick={() => setConfirmDialog(true)}
-          disabled={sending || studentsWithPendingFees.length === 0}
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">AI Payment Reminders</h1>
+          <p className="mt-1 text-sm text-gray-500">
+            Send AI-powered voice reminders to students with pending fees
+          </p>
+        </div>
+        <button
+          onClick={sendRemindersToAll}
+          disabled={calling || pendingFees.length === 0}
+          className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {sending ? 'Sending...' : 'Send All Reminders'}
-        </Button>
-      </Box>
-
-      {error && (
-        <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>
-          {error}
-        </Alert>
-      )}
-
-      {success && (
-        <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSuccess('')}>
-          {success}
-        </Alert>
-      )}
-
-      {sending && (
-        <Box sx={{ mb: 2 }}>
-          <Typography variant="body2" gutterBottom>
-            Sending reminders with AI integration...
-          </Typography>
-          <LinearProgress />
-        </Box>
-      )}
-
-      {/* Summary Cards */}
-      <Grid container spacing={3} sx={{ mb: 3 }}>
-        <Grid item xs={12} sm={4}>
-          <Card>
-            <CardContent>
-              <Box display="flex" alignItems="center">
-                <PhoneIcon color="primary" sx={{ mr: 2, fontSize: 40 }} />
-                <Box>
-                  <Typography color="textSecondary" gutterBottom>
-                    Students with Pending Fees
-                  </Typography>
-                  <Typography variant="h4">
-                    {studentsWithPendingFees.length}
-                  </Typography>
-                </Box>
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={12} sm={4}>
-          <Card>
-            <CardContent>
-              <Box display="flex" alignItems="center">
-                <CheckCircleIcon color="success" sx={{ mr: 2, fontSize: 40 }} />
-                <Box>
-                  <Typography color="textSecondary" gutterBottom>
-                    Completed Calls
-                  </Typography>
-                  <Typography variant="h4" color="success.main">
-                    {reminders.filter(r => r.status === 'completed').length}
-                  </Typography>
-                </Box>
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={12} sm={4}>
-          <Card>
-            <CardContent>
-              <Box display="flex" alignItems="center">
-                <ErrorIcon color="error" sx={{ mr: 2, fontSize: 40 }} />
-                <Box>
-                  <Typography color="textSecondary" gutterBottom>
-                    Failed Calls
-                  </Typography>
-                  <Typography variant="h4" color="error.main">
-                    {reminders.filter(r => r.status === 'failed').length}
-                  </Typography>
-                </Box>
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
+          {calling ? (
+            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+          ) : (
+            <Phone className="h-4 w-4 mr-2" />
+          )}
+          Call All Students ({pendingFees.length})
+        </button>
+      </div>
 
       {/* AI Features Info */}
-      <Card sx={{ mb: 3 }}>
-        <CardContent>
-          <Typography variant="h6" gutterBottom>
-            AI-Powered Features
-          </Typography>
-          <Typography variant="body2" color="text.secondary" paragraph>
-            • <strong>Live Transcription:</strong> Uses Groq's Whisper Large V3 Turbo for real-time speech-to-text
-          </Typography>
-          <Typography variant="body2" color="text.secondary" paragraph>
-            • <strong>Ultra-Fast AI Responses:</strong> Groq's fastest model provides responses in under 2 seconds
-          </Typography>
-          <Typography variant="body2" color="text.secondary" paragraph>
-            • <strong>Context-Aware:</strong> AI has full context of student details, course info, and fee amounts
-          </Typography>
-          <Typography variant="body2" color="text.secondary" paragraph>
-            • <strong>Smart Escalation:</strong> Automatically connects to mentors when AI cannot answer questions
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            • <strong>Rate Limited:</strong> Respects Twilio's 1.1s rate limit between calls
-          </Typography>
-        </CardContent>
-      </Card>
+      <div className="bg-blue-50 border border-blue-200 rounded-md p-4">
+        <div className="flex">
+          <div className="flex-shrink-0">
+            <AlertCircle className="h-5 w-5 text-blue-400" />
+          </div>
+          <div className="ml-3">
+            <h3 className="text-sm font-medium text-blue-800">
+              AI-Powered Reminder System
+            </h3>
+            <div className="mt-2 text-sm text-blue-700">
+              <ul className="list-disc list-inside space-y-1">
+                <li>Uses Groq's fastest AI model for ultra-fast responses (&lt;2 seconds)</li>
+                <li>Live transcription with Whisper Large V3 Turbo</li>
+                <li>Intelligent conversation flow with student context</li>
+                <li>Automatic mentor escalation for complex queries</li>
+                <li>Rate limited to 1.1 seconds between calls to respect Twilio limits</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
 
-      {/* Students with Pending Fees */}
-      <Card sx={{ mb: 3 }}>
-        <CardContent>
-          <Typography variant="h6" gutterBottom>
-            Students with Pending Fees ({studentsWithPendingFees.length})
-          </Typography>
-          {studentsWithPendingFees.length === 0 ? (
-            <Typography color="text.secondary">
-              No students with pending fees found.
-            </Typography>
+      {/* Pending Fees List */}
+      <div className="bg-white shadow rounded-lg">
+        <div className="px-4 py-5 sm:p-6">
+          <h3 className="text-lg leading-6 font-medium text-gray-900 mb-4">
+            Students with Pending Fees
+          </h3>
+          {pendingFees.length === 0 ? (
+            <div className="text-center py-8">
+              <CheckCircle className="mx-auto h-12 w-12 text-green-400" />
+              <h3 className="mt-2 text-sm font-medium text-gray-900">All fees paid!</h3>
+              <p className="mt-1 text-sm text-gray-500">No students have pending fees at the moment.</p>
+            </div>
           ) : (
-            <TableContainer>
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Name</TableCell>
-                    <TableCell>Phone</TableCell>
-                    <TableCell>Department</TableCell>
-                    <TableCell>Course</TableCell>
-                    <TableCell>Pending Amount</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {studentsWithPendingFees.map((student) => (
-                    <TableRow key={student.id}>
-                      <TableCell>{student.name}</TableCell>
-                      <TableCell>{student.phone}</TableCell>
-                      <TableCell>
-                        {student.department ? (
-                          <Chip label={student.department} size="small" />
-                        ) : (
-                          'N/A'
+            <div className="space-y-4">
+              {pendingFees.map((fee) => (
+                <div key={fee.id} className="border border-gray-200 rounded-lg p-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center">
+                      <div className="flex-shrink-0">
+                        <div className="h-10 w-10 rounded-full bg-red-100 flex items-center justify-center">
+                          <Phone className="h-5 w-5 text-red-600" />
+                        </div>
+                      </div>
+                      <div className="ml-4">
+                        <div className="flex items-center">
+                          <p className="text-sm font-medium text-gray-900">{fee.student_name}</p>
+                          <span className="ml-2 inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
+                            Pending
+                          </span>
+                        </div>
+                        <div className="mt-1 text-sm text-gray-500">
+                          Course: {fee.course_name || 'Not specified'}
+                          <span className="ml-2">• Phone: {fee.student_phone}</span>
+                        </div>
+                        {fee.due_date && (
+                          <div className="mt-1 text-sm text-gray-500">
+                            Due Date: {new Date(fee.due_date).toLocaleDateString()}
+                          </div>
                         )}
-                      </TableCell>
-                      <TableCell>
-                        {student.course_name ? (
-                          <Chip label={student.course_name} size="small" color="primary" />
+                      </div>
+                    </div>
+                    <div className="flex items-center space-x-4">
+                      <div className="text-right">
+                        <div className="text-sm font-medium text-gray-900">
+                          Total: ₹{parseFloat(fee.total_amount).toLocaleString()}
+                        </div>
+                        <div className="text-sm text-gray-500">
+                          Paid: ₹{parseFloat(fee.paid_amount).toLocaleString()}
+                        </div>
+                        <div className="text-sm font-medium text-red-600">
+                          Pending: ₹{parseFloat(fee.pending_amount).toLocaleString()}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => sendReminderToStudent(fee.student_id)}
+                        disabled={calling || callProgress[fee.student_id]}
+                        className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {callProgress[fee.student_id] ? (
+                          <>
+                            {getStatusIcon(callProgress[fee.student_id])}
+                            <span className="ml-1">
+                              {callProgress[fee.student_id] === 'calling' ? 'Calling...' : 
+                               callProgress[fee.student_id] === 'completed' ? 'Called' :
+                               callProgress[fee.student_id] === 'failed' ? 'Failed' : 'Processing...'}
+                            </span>
+                          </>
                         ) : (
-                          'N/A'
+                          <>
+                            <Play className="h-4 w-4 mr-1" />
+                            Call Now
+                          </>
                         )}
-                      </TableCell>
-                      <TableCell>
-                        <Typography variant="body2" color="error.main" fontWeight="bold">
-                          ₹{student.total_pending_amount}
-                        </Typography>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
-      {/* Reminder History */}
-      <Card>
-        <CardContent>
-          <Typography variant="h6" gutterBottom>
-            Reminder History
-          </Typography>
+      {/* Recent Reminders */}
+      <div className="bg-white shadow rounded-lg">
+        <div className="px-4 py-5 sm:p-6">
+          <h3 className="text-lg leading-6 font-medium text-gray-900 mb-4">
+            Recent Reminder Calls
+          </h3>
           {reminders.length === 0 ? (
-            <Typography color="text.secondary">
-              No reminders sent yet.
-            </Typography>
+            <div className="text-center py-8">
+              <Phone className="mx-auto h-12 w-12 text-gray-400" />
+              <h3 className="mt-2 text-sm font-medium text-gray-900">No reminders sent</h3>
+              <p className="mt-1 text-sm text-gray-500">Reminder calls will appear here once sent.</p>
+            </div>
           ) : (
-            <TableContainer>
-              <Table>
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Student</TableCell>
-                    <TableCell>Phone</TableCell>
-                    <TableCell>Status</TableCell>
-                    <TableCell>Call Duration</TableCell>
-                    <TableCell>AI Response</TableCell>
-                    <TableCell>Created</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {reminders.map((reminder) => (
-                    <TableRow key={reminder.id}>
-                      <TableCell>{reminder.student_name}</TableCell>
-                      <TableCell>{reminder.student_phone}</TableCell>
-                      <TableCell>
-                        <Chip
-                          icon={getStatusIcon(reminder.status)}
-                          label={reminder.status}
-                          size="small"
-                          color={getStatusColor(reminder.status)}
-                        />
-                      </TableCell>
-                      <TableCell>
-                        {reminder.call_duration ? `${reminder.call_duration}s` : 'N/A'}
-                      </TableCell>
-                      <TableCell>
-                        {reminder.ai_response ? (
-                          <Typography variant="body2" noWrap sx={{ maxWidth: 200 }}>
-                            {reminder.ai_response}
-                          </Typography>
-                        ) : (
-                          'N/A'
+            <div className="space-y-4">
+              {reminders.slice(0, 10).map((reminder) => (
+                <div key={reminder.id} className="border border-gray-200 rounded-lg p-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center">
+                      <div className="flex-shrink-0">
+                        {getStatusIcon(reminder.call_status)}
+                      </div>
+                      <div className="ml-4">
+                        <div className="flex items-center">
+                          <p className="text-sm font-medium text-gray-900">{reminder.student_name}</p>
+                          <span className={`ml-2 inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getStatusColor(reminder.call_status)}`}>
+                            {reminder.call_status}
+                          </span>
+                        </div>
+                        <div className="mt-1 text-sm text-gray-500">
+                          Course: {reminder.course_name || 'Not specified'}
+                          <span className="ml-2">• Phone: {reminder.student_phone}</span>
+                        </div>
+                        <div className="mt-1 text-sm text-gray-500">
+                          Pending Amount: ₹{parseFloat(reminder.pending_amount).toLocaleString()}
+                          <span className="ml-2">
+                            • Sent: {new Date(reminder.created_at).toLocaleString()}
+                          </span>
+                        </div>
+                        {reminder.ai_response && (
+                          <div className="mt-2 text-sm text-gray-600 bg-gray-50 p-2 rounded">
+                            <strong>AI Response:</strong> {reminder.ai_response}
+                          </div>
                         )}
-                      </TableCell>
-                      <TableCell>
-                        {new Date(reminder.created_at).toLocaleString()}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
           )}
-        </CardContent>
-      </Card>
-
-      {/* Confirmation Dialog */}
-      <Dialog open={confirmDialog} onClose={() => setConfirmDialog(false)}>
-        <DialogTitle>Send AI-Powered Reminders</DialogTitle>
-        <DialogContent>
-          <Typography>
-            Are you sure you want to send reminder calls to all {studentsWithPendingFees.length} students with pending fees?
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
-            This will:
-          </Typography>
-          <ul>
-            <li>Call each student with AI-powered voice interaction</li>
-            <li>Use live transcription and ultra-fast AI responses</li>
-            <li>Respect Twilio's rate limit (1.1s between calls)</li>
-            <li>Connect to mentors if AI cannot answer questions</li>
-          </ul>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setConfirmDialog(false)}>Cancel</Button>
-          <Button 
-            onClick={handleSendReminders} 
-            variant="contained" 
-            color="primary"
-            disabled={sending}
-          >
-            {sending ? 'Sending...' : 'Send Reminders'}
-          </Button>
-        </DialogActions>
-      </Dialog>
-    </Box>
+        </div>
+      </div>
+    </div>
   );
 };
 
