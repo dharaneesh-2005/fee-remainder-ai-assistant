@@ -1,33 +1,26 @@
-const jwt = require('jsonwebtoken');
-const pool = require('../config/database');
-
-const authenticateToken = async (req, res, next) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
-
-  if (!token) {
-    return res.status(401).json({ message: 'Access token required' });
+// Simple authentication middleware
+const authenticate = (req, res, next) => {
+  // For now, we'll use a simple username/password check
+  // In production, this would be replaced with proper authentication
+  const authHeader = req.headers.authorization;
+  
+  if (!authHeader) {
+    return res.status(401).json({ message: 'Authentication required' });
   }
-
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    
-    // Verify user still exists
-    const userResult = await pool.query(
-      'SELECT id, username, role FROM users WHERE id = $1',
-      [decoded.userId]
-    );
-
-    if (userResult.rows.length === 0) {
-      return res.status(401).json({ message: 'User not found' });
-    }
-
-    req.user = userResult.rows[0];
+  
+  // Simple check for demo purposes
+  // Format: Basic base64(username:password)
+  const base64Credentials = authHeader.split(' ')[1];
+  const credentials = Buffer.from(base64Credentials, 'base64').toString('ascii');
+  const [username, password] = credentials.split(':');
+  
+  // Default credentials for demo
+  if (username === 'admin' && password === 'admin123') {
+    req.user = { id: 1, username: 'admin' };
     next();
-  } catch (error) {
-    console.error('Token verification error:', error);
-    return res.status(403).json({ message: 'Invalid or expired token' });
+  } else {
+    return res.status(401).json({ message: 'Invalid credentials' });
   }
 };
 
-module.exports = { authenticateToken };
+module.exports = authenticate;

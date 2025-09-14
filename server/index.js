@@ -1,68 +1,31 @@
 const express = require('express');
 const cors = require('cors');
-const helmet = require('helmet');
-const rateLimit = require('express-rate-limit');
+const path = require('path');
 require('dotenv').config();
 
-const authRoutes = require('./routes/auth');
-const courseRoutes = require('./routes/courses');
-const studentRoutes = require('./routes/students');
-const feeRoutes = require('./routes/fees');
-const paymentRoutes = require('./routes/payments');
-const reminderRoutes = require('./routes/reminders');
-
 const app = express();
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 3000;
 
-// Security middleware
-app.use(helmet());
-
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
-  message: 'Too many requests from this IP, please try again later.'
-});
-app.use(limiter);
-
-// CORS configuration
-app.use(cors({
-  origin: process.env.NODE_ENV === 'production' ? false : 'http://localhost:3000',
-  credentials: true
-}));
-
-// Body parsing middleware
-app.use(express.json({ limit: '10mb' }));
+// Middleware
+app.use(cors());
+app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(express.static(path.join(__dirname, '../public')));
 
 // Routes
-app.use('/api/auth', authRoutes);
-app.use('/api/courses', courseRoutes);
-app.use('/api/students', studentRoutes);
-app.use('/api/fees', feeRoutes);
-app.use('/api/payments', paymentRoutes);
-app.use('/api/reminders', reminderRoutes);
+app.use('/api/auth', require('./routes/auth'));
+app.use('/api/courses', require('./routes/courses'));
+app.use('/api/students', require('./routes/students'));
+app.use('/api/fees', require('./routes/fees'));
+app.use('/api/payments', require('./routes/payments'));
+app.use('/api/reminders', require('./routes/reminders'));
 
-// Health check endpoint
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'OK', timestamp: new Date().toISOString() });
+// Serve frontend for all routes (for SPA)
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/index.html'));
 });
 
-// Error handling middleware
-app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({ 
-    message: 'Something went wrong!',
-    error: process.env.NODE_ENV === 'development' ? err.message : 'Internal server error'
-  });
-});
-
-// 404 handler
-app.use('*', (req, res) => {
-  res.status(404).json({ message: 'Route not found' });
-});
-
+// Start server
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`Server is running on port ${PORT}`);
 });

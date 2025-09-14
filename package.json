@@ -1,18 +1,31 @@
 {
-  "name": "ai-fee-reminder",
+  "name": "ai-fee-remainder-with-call-assistant",
   "version": "1.0.0",
-  "description": "AI-powered payment reminder system with Twilio and Groq integration",
-  "main": "server/index.js",
+  "main": "index.js",
   "scripts": {
-    "dev": "concurrently \"npm run server\" \"npm run client\"",
-    "server": "cd server && npm run dev",
-    "client": "cd client && npm start",
-    "install-all": "npm install && cd server && npm install && cd ../client && npm install"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server/index.js",
+    "dev": "nodemon server/index.js",
+    "init-db": "node server/config/init-db.js"
   },
-  "keywords": ["ai", "payment", "reminder", "twilio", "groq"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dharaneesh-2005/fee-remainder-ai-assistant.git"
+  },
+  "keywords": [],
   "author": "",
-  "license": "MIT",
-  "devDependencies": {
-    "concurrently": "^8.2.2"
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/dharaneesh-2005/fee-remainder-ai-assistant/issues"
+  },
+  "homepage": "https://github.com/dharaneesh-2005/fee-remainder-ai-assistant#readme",
+  "description": "",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.2",
+    "express": "^5.1.0",
+    "groq-sdk": "^0.32.0",
+    "pg": "^8.16.3",
+    "twilio": "^5.9.0"
   }
 }
